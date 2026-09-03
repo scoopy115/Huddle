@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- macOS-style app icon: the brand tile occupies 824/1024 of the canvas, as Apple's HIG grid prescribes. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <filter id="s" x="-10%" y="-10%" width="120%" height="130%">
+      <feDropShadow dx="0" dy="10" stdDeviation="10" flood-color="#000" flood-opacity="0.22"/>
+    </filter>
+  </defs>
+  <g transform="translate(100 100) scale(0.824)" filter="url(#s)">
+    <rect width="1000" height="1000" rx="254.5539" ry="254.5539" fill="#f9f9f9"/>
+    <path d="M724.1989,461.6645c-4.9843-91.6463-40.8535-131.4614-116.538-131.4614-81.6777,0-113.5417,47.796-132.4702,128.4649.9791-97.6095,0-196.1983-1.0086-293.8077-66.7248-7.9809-133.4493-7.9809-200.1739,0,4.9546,214.118,4.9546,461.1385,0,670.302,67.7037,7.9512,136.4457,7.9512,204.1791,0l-5.9931-247.9996h58.7734l-9.9686,247.9996c67.7334,7.9512,134.458,7.9512,202.1914,0,2.9966-180.2663,3.9755-314.7242,1.0086-373.4977Z" fill="#ea3d3d"/>
+  </g>
+</svg>

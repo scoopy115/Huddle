@@ -1,0 +1,223 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+/*
+ * Huddle brand: one red (#ea3d3d) on warm paper. The red is the accent everywhere —
+ * record, delete, active navigation, progress. Primary buttons are "ink" (warm near-black,
+ * inverted in dark mode) so an action button is never mistaken for a destructive one.
+ */
+:root {
+  --bg: 249 248 246;
+  --surface: 255 255 255;
+  --sidebar: 243 241 238;
+  --border: 231 228 223;
+  --fg: 28 25 24;
+  --muted: 122 115 110;
+  --accent: 234 61 61;
+  --accent-fg: 255 255 255;
+  --accent-soft: 253 236 236;
+  --danger: 234 61 61;
+  --record: 234 61 61;
+  --ink: 28 25 24;
+  --ink-fg: 255 255 255;
+  --shadow: 28 25 24;
+}
+
+.dark {
+  --bg: 22 20 20;
+  --surface: 31 28 28;
+  --sidebar: 26 24 24;
+  --border: 54 49 48;
+  --fg: 240 236 232;
+  --muted: 160 151 146;
+  --accent: 242 88 88;
+  --accent-fg: 255 255 255;
+  --accent-soft: 62 34 34;
+  --danger: 242 88 88;
+  --record: 242 88 88;
+  --ink: 245 242 238;
+  --ink-fg: 28 25 24;
+  --shadow: 0 0 0;
+}
+
+@theme inline {
+  --color-bg: rgb(var(--bg));
+  --color-surface: rgb(var(--surface));
+  --color-sidebar: rgb(var(--sidebar));
+  --color-border: rgb(var(--border));
+  --color-fg: rgb(var(--fg));
+  --color-muted: rgb(var(--muted));
+  --color-accent: rgb(var(--accent));
+  --color-accent-fg: rgb(var(--accent-fg));
+  --color-accent-soft: rgb(var(--accent-soft));
+  --color-danger: rgb(var(--danger));
+  --color-record: rgb(var(--record));
+  --color-ink: rgb(var(--ink));
+  --color-ink-fg: rgb(var(--ink-fg));
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", system-ui, sans-serif;
+  /* Rounded display face: echoes the soft, chunky letterforms of the wordmark. */
+  --font-display: ui-rounded, "SF Pro Rounded", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  --font-mono: "SF Mono", ui-monospace, Menlo, monospace;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  @apply bg-bg text-fg font-sans antialiased text-[13px] leading-normal select-none;
+  -webkit-font-smoothing: antialiased;
+  overscroll-behavior: none;
+}
+
+.selectable {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(var(--muted) / 0.35) transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background: rgb(var(--muted) / 0.3);
+  border-radius: 8px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+@keyframes pulse-record {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+.animate-record {
+  animation: pulse-record 1.4s ease-in-out infinite;
+}
+
+/* Expanding rings behind the timer while recording. */
+@keyframes ring {
+  0% {
+    transform: scale(0.6);
+    opacity: 0.5;
+  }
+  100% {
+    transform: scale(1.6);
+    opacity: 0;
+  }
+}
+.animate-ring {
+  animation: ring 2.4s cubic-bezier(0.2, 0.6, 0.3, 1) infinite;
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.animate-rise {
+  animation: rise 0.35s ease-out both;
+}
+
+@layer base {
+  input,
+  textarea,
+  select,
+  button {
+    font: inherit;
+    color: inherit;
+  }
+  button {
+    cursor: default;
+  }
+  :focus-visible {
+    outline: 2px solid rgb(var(--accent) / 0.55);
+    outline-offset: 1px;
+    border-radius: 8px;
+  }
+}
+
+@layer components {
+  /* Every content panel: soft corners, hairline border, a whisper of depth. */
+  .panel {
+    @apply rounded-xl border border-border bg-surface;
+    box-shadow:
+      0 1px 2px rgb(var(--shadow) / 0.04),
+      0 12px 32px -20px rgb(var(--shadow) / 0.25);
+  }
+  .dark .panel {
+    box-shadow: 0 1px 0 rgb(255 255 255 / 0.03) inset;
+  }
+  /* Page headers: the rounded display face, a touch bigger than before. */
+  .page-title {
+    @apply font-display text-[17px] font-bold tracking-tight;
+  }
+  /* Every clickable control: a quick, springy press. Transform-only, so layout never shifts. */
+  .pressable {
+    transition:
+      transform 120ms cubic-bezier(0.2, 0.8, 0.3, 1.4),
+      background-color 150ms ease,
+      box-shadow 150ms ease,
+      filter 150ms ease,
+      border-color 150ms ease,
+      color 150ms ease;
+  }
+  .pressable:active:not(:disabled) {
+    transform: scale(0.94);
+    transition-duration: 60ms;
+  }
+  /* Rich-text editor content: Tailwind's reset removes list bullets, put them back. */
+  .rich ul {
+    list-style: disc;
+    padding-left: 1.25rem;
+    margin: 0.25rem 0;
+  }
+  .rich ol {
+    list-style: decimal;
+    padding-left: 1.25rem;
+    margin: 0.25rem 0;
+  }
+  .rich b,
+  .rich strong {
+    font-weight: 600;
+  }
+  /* Red glow under the brand CTA and the record button. */
+  .glow-accent {
+    box-shadow:
+      0 1px 2px rgb(var(--accent) / 0.3),
+      0 10px 24px -10px rgb(var(--accent) / 0.65);
+  }
+  /* Soft radial wash used behind hero moments (record screen, empty states). */
+  .wash-accent {
+    background:
+      radial-gradient(60% 50% at 50% 40%, rgb(var(--accent) / 0.1), transparent 70%);
+  }
+}
+
+input[type="date"],
+input[type="number"] {
+  color-scheme: light;
+}
+.dark input[type="date"],
+.dark input[type="number"],
+.dark select {
+  color-scheme: dark;
+}

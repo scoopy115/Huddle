@@ -1,0 +1,16 @@
+# Huddle engine — Python 3.11
+fastapi>=0.115
+uvicorn[standard]>=0.30
+pydantic>=2.7
+httpx>=0.27
+numpy>=1.24
+soundfile>=0.12.1          # WAV read/write (BSD)
+faster-whisper>=1.1        # CTranslate2 Whisper (MIT); brings PyAV for decoding imports
+huggingface-hub>=0.24      # model downloads (Apache-2.0)
+tqdm>=4.66
+scikit-learn>=1.3          # clustering (BSD)
+sherpa-onnx>=1.12          # speaker segmentation + embeddings via ONNX Runtime (Apache-2.0); models fetched on first use
+mcp>=1.2                   # MCP server SDK (MIT)
+mlx-whisper>=0.4; sys_platform == "darwin" and platform_machine == "arm64"   # Metal Whisper (MIT)
+pytest>=8.0
+ruff>=0.6

@@ -1,0 +1,16 @@
+# Engine lint rules (ruff). Kept in the repo so results do not depend on a developer's user config.
+line-length = 130
+target-version = "py311"
+
+[lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+ignore = [
+  "E501",    # long lines: prompts and SQL read better unwrapped; the formatter is not enforced
+  "RUF001", "RUF002", "RUF003",  # typographic quotes/dashes in user-facing strings are intentional
+  "SIM108",  # ternaries are not always clearer
+  "B904",    # `raise HTTPException(...)` inside except is the FastAPI idiom; chaining adds nothing for API errors
+  "B905",    # zip(strict=) everywhere hurts readability; lengths are guaranteed by construction where zip is used
+]
+
+[lint.per-file-ignores]
+"tests/*" = ["B011", "RUF012"]

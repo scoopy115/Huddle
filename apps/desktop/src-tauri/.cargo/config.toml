@@ -1,0 +1,4 @@
+# Build output outside iCloud sync: Desktop & Documents sync skips folders named *.nosync,
+# and Finder copies out of a synced folder crawl through the file provider (minutes per app copy).
+[build]
+target-dir = "target.nosync"
