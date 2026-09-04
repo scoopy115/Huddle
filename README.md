@@ -1,63 +1,75 @@
-# Huddle
+<p align="center">
+  <img src="apps/desktop/src/assets/huddle-logo.svg" alt="Huddle" width="220">
+</p>
 
-A private, local-first meeting recorder and knowledge base for **in-person meetings**.
-Put your Mac on the table, press Record, press Stop. Huddle transcribes the room, separates
-speakers, writes a summary with decisions and action items, and makes everything searchable —
-entirely on your machine. An MCP server lets AI agents query your meeting memory without
-touching your filesystem.
+# Huddle: Private Meeting Notes, Made on Your Mac
 
-A Python processing engine (Whisper on MLX/CTranslate2, sherpa-onnx speaker separation, Ollama
-notes) wrapped in a Tauri 2 + React desktop app. macOS (Apple Silicon) first; the architecture
-is portable to Windows. Huddle started from an audit of [MeetingScribe](https://github.com/elmoghany/meeting-scribe);
-its code is no longer used.
+![macOS](https://img.shields.io/badge/macOS-14.0%2B%20Apple%20Silicon-black.svg?logo=apple&logoColor=white)
+![Status](https://img.shields.io/badge/Status-Active-success)
+![License](https://img.shields.io/badge/License-MIT-blue.svg)
 
-```
-Tauri desktop app (Rust + React/TypeScript)        Processing engine (Python sidecar, localhost)
-  recording (cpal → WAV, crash-safe) · menu-bar tray  SQLite + FTS5 (versioned migrations)
-  devices · hardware · app paths                     resumable processing jobs
-  engine lifecycle + token-authenticated proxy       providers: Whisper (MLX / CTranslate2) · sherpa-onnx · Ollama / LM Studio / llama.cpp
-  UI: meetings · search · action items · settings    model discovery + resolver (never duplicates models you already have)
-                                                     MCP server (stdio) over the same services
-```
+**Huddle** records your meetings and turns them into transcripts, speaker-separated conversations,
+summaries, decisions and action items, **entirely on your own Mac**. No account, no cloud, no
+subscription. Put your MacBook on the table for an in-person meeting, or let it listen to the
+other side of a video call; press Stop and the notes write themselves while nothing leaves your
+computer.
 
-No accounts, no cloud, no API keys, no Ollama requirement (but Ollama/LM Studio models are reused
-when present). After models are downloaded the app works fully offline.
+---
 
-## Install
+## 🚀 Key Features
 
-Requirements: a Mac with Apple Silicon running macOS 14.2 or newer.
+### 🎙️ Recording
+* **In the room or on a call:** records the microphone and, optionally, the audio of every other
+  app on your Mac (Teams, Zoom, Meet, FaceTime).
+* **Menu bar mode:** close the window and Huddle keeps a small recorder in the menu bar. Click it
+  or press **⌥⌘R** to start and stop from anywhere.
+* **Crash-safe:** the audio file is finalised every second, so a lost battery still leaves a
+  recoverable recording.
+* **Import:** drop in an existing audio file and get the same treatment.
+
+### ✍️ Notes
+* **Transcript with speakers:** who said what, with timestamps. Rename or merge speakers; Huddle
+  suggests names it recognises from earlier meetings.
+* **Summary, topics, decisions:** structured notes with evidence links back into the transcript,
+  written in the language you choose (56 languages) whatever language was spoken.
+* **Action items:** extracted on demand and tracked across meetings until you tick them off.
+* **Refine:** tell Huddle what it got wrong  and it
+  rewrites the notes.
+* **Ask:** ask one meeting or all of them a question.
+
+### 🔒 Private by design
+* **Everything runs locally:** transcription, speaker separation and summaries all run on your
+  Mac. Huddle works fully offline once the models are downloaded.
+* **Your data stays yours:** recordings, transcripts and notes live in one folder under
+  Application Support. Export any meeting as Markdown, text, SRT, JSON, or the original audio.
+* **Storage limit:** set how much disk recordings may use; older audio is pruned first.
+
+### 🤖 Works with your AI tools
+* **MCP server:** Claude Desktop, Claude Code, Cursor and other MCP clients can search your
+  meetings, read transcripts and pull open action items, without touching your filesystem.
+  Settings → MCP shows the ready-made configuration for each client.
+* **Network access (optional):** share the MCP server on your local network with API keys.
+* **Bring your own models:** Huddle finds models you already have (Ollama, LM Studio, Hugging
+  Face cache) and only downloads what is missing.
+
+---
+
+## 📦 Install
+
+Requirements: a Mac with **Apple Silicon** running **macOS 14.2 or newer**. About 1 GB of disk
+for the app plus the models you choose (the recommended set is around 5 GB). At least 16 GB of RAM is recommended, but small AI models will probably also work on 8 GB of RAM.
 
 1. Download `Huddle-<version>-macos-arm64.zip` from the latest [release](../../releases/latest),
    unzip it and drag `Huddle.app` into Applications.
-2. First launch: right-click `Huddle.app` → Open. Builds are not notarized yet, so macOS may still
-   refuse; then go to System Settings → Privacy & Security and click **Open Anyway**.
-3. Huddle asks for the microphone and, if you enable it, system audio (the other side of online
-   meetings). It then checks what is already on your Mac and offers the model downloads it needs.
+2. Open it. On first launch Huddle asks for the microphone and, if you want the other side of
+   calls, system audio. It then checks what is already on your Mac and offers the model
+   downloads it needs.
 
-Huddle checks the releases page on launch and once a day and updates itself when you say so.
+---
 
-## Status
+## 🧑‍💻 Development
 
-Phases 0–9 of the implementation plan are in place and verified on an M4 Pro:
-
-| Phase | State |
-|---|---|
-| 1 Desktop shell | Sidebar, meetings list, meeting detail, settings |
-| 2 Recording | cpal microphone capture + optional system audio via a Core Audio process tap (no driver; macOS 14.2+), level meter, WAV header patched every second, crash recovery |
-| 3 Vertical slice | Record/import → transcript in the UI. MLX Whisper on Apple Silicon (~19× realtime), CTranslate2 fallback; language detected per utterance, 99 languages; live transcription while recording |
-| 4 Diarization | sherpa-onnx (pyannote segmentation + TitaNet embeddings), rename/merge speakers, known-speaker suggestions (confirm, never auto-assign) |
-| 5 AI output | Structured summary/topics/decisions in the app language with evidence timestamps; action items on demand; speaker names inferred from the conversation |
-| 6 Discovery | Apple Silicon/Metal, Ollama (API or manifests), LM Studio, Hugging Face cache, whisper.cpp/WhisperKit. AI runs through Ollama only |
-| 7 Models | Inventory, compatibility by (task, format, runtime), external ownership, downloads with sha256, storage estimate |
-| 8 Search | FTS5 with prefix matching, click-to-seek, "ask this meeting" / "ask all meetings" over retrieval |
-| 9 MCP | `huddle-engine mcp` (stdio) with targeted retrieval tools; optional LAN server with API keys |
-| 10 Packaging | macOS `.app` builds (`scripts/build-engine.sh`, `scripts/build-app.sh`), release zip (`scripts/package-release.sh`) |
-| 12 Updates | Checks the GitHub releases of this repo on launch and daily; "A new version of Huddle is available" downloads the zip, swaps the app in place and relaunches |
-| 11 Menu bar | Optional menu-bar mode: close the window, the engine sleeps, the menu-bar popover or ⌥⌘R records instantly without touching the Dock; stopping opens Huddle and processes the meeting. Audio export per meeting |
-
-## Development
-
-Requirements: macOS (Apple Silicon), Xcode Command Line Tools, Node 20+, Rust (rustup),
+Requirements: macOS (Apple Silicon), Xcode Command Line Tools, Node 20+, Rust,
 Homebrew Python 3.11 (`python3.11`).
 
 ```bash
@@ -65,42 +77,37 @@ Homebrew Python 3.11 (`python3.11`).
 cd engine
 python3.11 -m venv .venv
 .venv/bin/pip install -r requirements.txt
-.venv/bin/python -m pytest              # 57 tests
-.venv/bin/python -m huddle_engine doctor  # hardware, providers, models, resolution
+.venv/bin/python -m pytest                 # tests
+.venv/bin/python -m huddle_engine doctor   # hardware, providers, models, resolution
 
-# 2. system-audio helper (ScreenCaptureKit; needs Xcode Command Line Tools)
+# 2. system-audio helper (Swift; needs Xcode Command Line Tools)
 ../scripts/build-audio-tap.sh
 
-# 3. desktop app (starts Vite + Tauri; the app spawns engine/.venv automatically)
+# 3. speaker models (bundled into the app)
+../scripts/fetch-speaker-models.sh
+
+# 4. desktop app (starts Vite + Tauri; the app spawns engine/.venv automatically)
 cd ../apps/desktop
 npm install
 npx tauri dev
 ```
 
-Headless vertical slice without the UI:
+---
 
-```bash
-cd engine
-.venv/bin/python -m huddle_engine process path/to/meeting.m4a --title "Branding"
-```
+## ❤️ Credits & Acknowledgment
 
-Data lives in `~/Library/Application Support/com.huddle.desktop` (`huddle.db`, `recordings/`,
-`models/`, `logs/`). Override with `HUDDLE_DATA_DIR`.
+Huddle stands on excellent open-source work:
 
-### MCP
+* **Transcription:** [Whisper](https://github.com/openai/whisper) via [mlx-whisper](https://github.com/ml-explore/mlx-examples) and [CTranslate2](https://github.com/OpenNMT/CTranslate2)
+* **Speaker separation:** [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) with the [pyannote](https://github.com/pyannote/pyannote-audio) segmentation model and NVIDIA's TitaNet embeddings
+* **Notes:** [Ollama](https://ollama.com) running local models such as Qwen
+* **App:** [Tauri](https://tauri.app), [React](https://react.dev), [Tailwind CSS](https://tailwindcss.com), [FastAPI](https://fastapi.tiangolo.com)
 
-```json
-{ "mcpServers": { "huddle": { "command": "/path/to/engine/.venv/bin/python",
-                              "args": ["-m", "huddle_engine", "mcp"],
-                              "cwd": "/path/to/engine" } } }
-```
+Huddle is created by me with extensive assistance from **Claude Fable 5.1** (Anthropic) as
+a co-pilot for architecture, implementation and debugging.
 
-Tools: `list_meetings`, `get_meeting`, `get_transcript`, `get_transcript_context`,
-`search_transcripts`, `search_meetings`, `get_summary`, `get_topics`, `get_decisions`,
-`get_action_items`, `get_open_action_items`, `search_semantic` (falls back to FTS until a local
-embedding provider lands).
+---
 
-## License
+## 📄 License
 
-Huddle is MIT licensed. Model and runtime licenses are listed in [THIRD-PARTY-LICENSES.md](THIRD-PARTY-LICENSES.md); no model is bundled in the
-installer.
+Huddle is released under the [MIT License](LICENSE).
