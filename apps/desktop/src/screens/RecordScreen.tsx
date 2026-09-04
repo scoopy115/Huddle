@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Languages, Mic, Monitor, RefreshCw, Square, Users, X } from "lucide-react";
 import { languageOptions } from "@/lib/languages";
 import { SPEAKER_COUNT_OPTIONS, speakerCountLabel } from "@/components/MeetingMenu";
-import { sounds } from "@/lib/sounds";
+import { resetAudio, sounds } from "@/lib/sounds";
 import { native, type InputDevice, type RecordingMeta, type SystemAudioSupport } from "@/lib/native";
 import { api, errorMessage } from "@/lib/api";
 import { fmtTime } from "@/lib/format";
@@ -112,6 +112,7 @@ export function RecordScreen({
     setBusy(true);
     try {
       const m = await native.startRecording(device, systemAudio, null);
+      resetAudio();
       sounds.recordStart();
       setMeta(m);
       setElapsed(0);
@@ -127,6 +128,7 @@ export function RecordScreen({
     setBusy(true);
     try {
       const m = await native.stopRecording();
+      resetAudio();
       sounds.recordStop();
       onRecordingStateChange(false);
       setMeta(null);

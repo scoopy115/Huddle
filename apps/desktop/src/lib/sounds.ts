@@ -10,6 +10,17 @@ let lastTap = 0;
 
 export function setSoundsEnabled(v: boolean) { enabled = v; }
 
+/**
+ * Drop the cached AudioContext. WebKit binds a context to the output device's configuration at
+ * creation; a recording (microphone stream, system-audio tap) can change that configuration and
+ * leave the old context silently dead. The next sound creates a fresh one.
+ */
+export function resetAudio() {
+  const c = ctx;
+  ctx = null;
+  c?.close().catch(() => {});
+}
+
 function context(): AudioContext | null {
   if (!enabled) return null;
   try {

@@ -66,6 +66,18 @@ pub fn open_microphone_settings() -> Result<(), String> {
     Ok(())
 }
 
+/// Current nominal sample rate of an input device (default device when `name` is None).
+pub fn input_nominal_rate(name: Option<&str>) -> Option<u32> {
+    let helper = helper_path()?;
+    let mut cmd = Command::new(helper);
+    cmd.arg("input-rate");
+    if let Some(n) = name {
+        cmd.arg(n);
+    }
+    let out = cmd.output().ok()?;
+    String::from_utf8_lossy(&out.stdout).trim().parse::<u32>().ok().filter(|r| *r >= 8000)
+}
+
 fn unsupported() -> Option<SystemAudioSupport> {
     if !cfg!(target_os = "macos") {
         return Some(SystemAudioSupport { supported: false, permission: "unknown".into(), message: Some("System audio capture is only available on macOS 14.2 or newer.".into()) });

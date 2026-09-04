@@ -7,6 +7,7 @@
 //   huddle-audio-tap mic-check          → prints "granted" | "denied" | "undetermined" (Microphone permission)
 //   huddle-audio-tap mic-request        → asks for Microphone permission, prints "granted" | "denied"
 //   huddle-audio-tap record <out.wav>   → writes 16-bit mono 48 kHz WAV until stdin closes or SIGTERM
+//   huddle-audio-tap input-rate [name]  → prints the current nominal sample rate of an input device (default: the default one)
 //
 // macOS has no API to read the system-audio permission back, and a tap without permission delivers
 // silence rather than an error. `check` therefore probes: it runs a tap for 0.5 s while playing a
@@ -289,7 +290,7 @@ func runRecording(outPath: String) -> Never {
 // MARK: - Commands
 
 let args = CommandLine.arguments
-guard args.count >= 2 else { fail("usage: huddle-audio-tap check|request|mic-check|mic-request|record <out.wav>", code: 64) }
+guard args.count >= 2 else { fail("usage: huddle-audio-tap check|request|mic-check|mic-request|input-rate [name]|record <out.wav>", code: 64) }
 guard #available(macOS 14.2, *) else { fail("System audio capture needs macOS 14.2 or newer.", code: 5) }
 
 switch args[1] {
@@ -310,6 +311,38 @@ case "mic-request":
     AVCaptureDevice.requestAccess(for: .audio) { granted in ok = granted; sem.signal() }
     _ = sem.wait(timeout: .now() + 120)
     print(ok ? "granted" : "denied"); exit(0)
+case "input-rate":
+    // The recorder opens the microphone at this rate so it never re-clocks the device: the
+    // built-in mic and speakers share a clock, and changing it disturbs every other app's audio.
+    func name(of dev: AudioObjectID) -> String? {
+        var addr = AudioObjectPropertyAddress(mSelector: kAudioObjectPropertyName, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+        var s: Unmanaged<CFString>? = nil
+        var size = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)
+        guard AudioObjectGetPropertyData(dev, &addr, 0, nil, &size, &s) == noErr else { return nil }
+        return s?.takeUnretainedValue() as String?
+    }
+    var dev = AudioObjectID(kAudioObjectUnknown)
+    if args.count >= 3 {
+        var addr = AudioObjectPropertyAddress(mSelector: kAudioHardwarePropertyDevices, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+        var size: UInt32 = 0
+        if AudioObjectGetPropertyDataSize(AudioObjectID(kAudioObjectSystemObject), &addr, 0, nil, &size) == noErr {
+            var ids = [AudioObjectID](repeating: 0, count: Int(size) / MemoryLayout<AudioObjectID>.size)
+            if AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &addr, 0, nil, &size, &ids) == noErr {
+                dev = ids.first { name(of: $0) == args[2] } ?? kAudioObjectUnknown
+            }
+        }
+    }
+    if dev == kAudioObjectUnknown {
+        var addr = AudioObjectPropertyAddress(mSelector: kAudioHardwarePropertyDefaultInputDevice, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+        var size = UInt32(MemoryLayout<AudioObjectID>.size)
+        _ = AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &addr, 0, nil, &size, &dev)
+    }
+    guard dev != kAudioObjectUnknown else { fail("no input device", code: 6) }
+    var rateAddr = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyNominalSampleRate, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+    var rate: Float64 = 0
+    var rateSize = UInt32(MemoryLayout<Float64>.size)
+    guard AudioObjectGetPropertyData(dev, &rateAddr, 0, nil, &rateSize, &rate) == noErr else { fail("no rate", code: 6) }
+    print(Int(rate)); exit(0)
 case "record":
     guard args.count >= 3 else { fail("missing output path", code: 64) }
     runRecording(outPath: args[2])

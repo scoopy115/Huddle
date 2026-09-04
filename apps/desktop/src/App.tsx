@@ -3,7 +3,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { AlertTriangle } from "lucide-react";
 import { api, errorMessage } from "@/lib/api";
 import { isTauri, native, type EngineStatus, type RecordingMeta } from "@/lib/native";
-import { setSoundsEnabled, sounds } from "@/lib/sounds";
+import { resetAudio, setSoundsEnabled, sounds } from "@/lib/sounds";
 import { syncNetworkProxy } from "@/lib/mcpProxy";
 import { syncShellPrefs } from "@/lib/shellPrefs";
 import { checkForUpdates, scheduleUpdateChecks } from "@/lib/updates";
@@ -111,8 +111,8 @@ export default function App() {
   useEffect(() => {
     const uns: (() => void)[] = [];
     // The shell plays the chimes for recordings it started itself.
-    native.onRecordingStarted(() => setRecording(true)).then((u) => uns.push(u));
-    native.onRecordingStopped(() => { setRecording(false); submitPending(); }).then((u) => uns.push(u));
+    native.onRecordingStarted(() => { setRecording(true); resetAudio(); }).then((u) => uns.push(u));
+    native.onRecordingStopped(() => { setRecording(false); resetAudio(); submitPending(); }).then((u) => uns.push(u));
     return () => uns.forEach((u) => u());
   }, [submitPending]);
   useEffect(() => {

@@ -220,8 +220,42 @@ fn find_device(name: Option<&str>) -> Result<cpal::Device, String> {
 
 /// Open a cpal input stream for `device`, writing mono PCM16 to `path`.
 /// `level_cb` receives (rms, peak) roughly 10×/s.
+/// The stream config to open the microphone with: cpal's "default" config can name a different
+/// rate than the device currently runs at (24 kHz on a MacBook mic that sits at 48 kHz), and
+/// opening it at that rate re-clocks the device. The built-in mic and speakers share a clock, so
+/// that dragged every other app's output along (and the system-audio tap with it). Prefer a
+/// supported config at the device's current nominal rate.
+fn input_config(device: &cpal::Device, name: Option<&str>) -> Result<cpal::SupportedStreamConfig, String> {
+    let default = device.default_input_config().map_err(|e| format!("Could not read microphone configuration: {e}"))?;
+    let Some(rate) = crate::system_audio::input_nominal_rate(name) else { return Ok(default) };
+    if default.sample_rate().0 == rate {
+        return Ok(default);
+    }
+    let Ok(ranges) = device.supported_input_configs() else { return Ok(default) };
+    let mut best: Option<cpal::SupportedStreamConfigRange> = None;
+    for r in ranges {
+        if r.min_sample_rate().0 <= rate && rate <= r.max_sample_rate().0 && r.sample_format() == default.sample_format() {
+            let better = match &best {
+                None => true,
+                Some(b) => (r.channels() == default.channels()) as u8 > (b.channels() == default.channels()) as u8 || (r.channels() < b.channels() && b.channels() != default.channels()),
+            };
+            if better {
+                best = Some(r);
+            }
+        }
+    }
+    match best {
+        Some(b) => {
+            log::info!("microphone opened at its current {rate} Hz (default config said {} Hz)", default.sample_rate().0);
+            Ok(b.with_sample_rate(cpal::SampleRate(rate)))
+        }
+        None => Ok(default),
+    }
+}
+
 fn start_capture(
     device: &cpal::Device,
+    config: cpal::SupportedStreamConfig,
     path: PathBuf,
     dir: PathBuf,
     meta: Option<RecordingMeta>,
@@ -229,9 +263,6 @@ fn start_capture(
     err_slot: Arc<Mutex<Option<String>>>,
     level_cb: Arc<dyn Fn(f32, f32) + Send + Sync>,
 ) -> Result<Capture, String> {
-    let config = device
-        .default_input_config()
-        .map_err(|e| format!("Could not read audio device configuration: {e}"))?;
     let sample_rate = config.sample_rate().0;
     let in_channels = config.channels() as usize;
 
@@ -344,11 +375,8 @@ pub fn start(app: &AppHandle, device_name: Option<String>, want_system: bool) ->
 
     let device = find_device(device_name.as_deref())?;
     let dev_name = device.name().unwrap_or_else(|_| "Microphone".into());
-    let sample_rate = device
-        .default_input_config()
-        .map_err(|e| format!("Could not read microphone configuration: {e}"))?
-        .sample_rate()
-        .0;
+    let config = input_config(&device, device_name.as_deref())?;
+    let sample_rate = config.sample_rate().0;
 
     let data_dir = paths::data_dir(app).map_err(|e| e.to_string())?;
     let id = format!(
@@ -398,7 +426,7 @@ pub fn start(app: &AppHandle, device_name: Option<String>, want_system: bool) ->
             let _ = app.emit("recording:level", LevelEvent { rms, peak, elapsed_sec: started.elapsed().as_secs_f64(), system_rms });
         })
     };
-    let mic = match start_capture(&device, wav_path, dir.clone(), Some(meta.clone()), stopped.clone(), stream_error.clone(), mic_cb) {
+    let mic = match start_capture(&device, config, wav_path, dir.clone(), Some(meta.clone()), stopped.clone(), stream_error.clone(), mic_cb) {
         Ok(c) => c,
         Err(e) => { if let Some(t) = system_tap { let _ = t.stop(); } return Err(e); }
     };
