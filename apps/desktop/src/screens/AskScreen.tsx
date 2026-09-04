@@ -47,6 +47,23 @@ export function AskScreen({ meetings }: { meetings: Meeting[] }) {
     }
   };
 
+  if (!ai.ready) {
+    // No AI model: the page is off. No composer, no suggestions — just the way to fix it.
+    return (
+      <div className="flex h-full flex-col">
+        <header data-tauri-drag-region className="titlebar-drag flex h-[52px] shrink-0 items-center gap-3 border-b border-border px-5">
+          <h1 data-tauri-drag-region className="page-title text-muted">Ask</h1>
+        </header>
+        <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 pb-16 text-center">
+          <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-fg/10 text-muted"><MessageSquareText className="h-6 w-6" /></div>
+          <div className="font-display text-[17px] font-bold tracking-tight">Ask needs an AI model</div>
+          <p className="max-w-md text-[13px] text-muted">{AI_MISSING_HINT} Transcripts and search keep working without one.</p>
+          <Button variant="primary" size="sm" onClick={() => go({ kind: "settings", section: "models" })}>Open Models</Button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex h-full flex-col">
       <header data-tauri-drag-region className="titlebar-drag flex h-[52px] shrink-0 items-center gap-3 border-b border-border px-5">
@@ -57,15 +74,7 @@ export function AskScreen({ meetings }: { meetings: Meeting[] }) {
 
       <div className="flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-[760px] px-6 py-6">
-          {!ai.ready && (
-            <div className="flex flex-col items-center gap-3 pt-16 text-center">
-              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-fg/10 text-muted"><MessageSquareText className="h-6 w-6" /></div>
-              <div className="font-display text-[17px] font-bold tracking-tight">Ask needs an AI model</div>
-              <p className="max-w-md text-[13px] text-muted">{AI_MISSING_HINT} Transcripts and search keep working without one.</p>
-              <Button variant="primary" size="sm" onClick={() => go({ kind: "settings", section: "models" })}>Open Models</Button>
-            </div>
-          )}
-          {ai.ready && turns.length === 0 && (
+          {turns.length === 0 && (
             <div className="flex flex-col items-center gap-3 pt-16 text-center">
               <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-accent text-white glow-accent"><MessageSquareText className="h-6 w-6 text-white" /></div>
               <div className="font-display text-[17px] font-bold tracking-tight">Ask about your meetings</div>

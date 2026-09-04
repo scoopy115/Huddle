@@ -16,11 +16,11 @@ export interface UpdateState {
   prompt: boolean;
   installing: UpdateProgress | null;
   installError: string | null;
-  /** Unpacked app when it could not be installed automatically. */
-  fallbackPath: string | null;
+  /** The unpacked new version, once downloaded. */
+  unpacked: { appPath: string; folder: string } | null;
 }
 
-let state: UpdateState = { checking: false, checkedAt: null, currentVersion: null, available: null, error: null, prompt: false, installing: null, installError: null, fallbackPath: null };
+let state: UpdateState = { checking: false, checkedAt: null, currentVersion: null, available: null, error: null, prompt: false, installing: null, installError: null, unpacked: null };
 const listeners = new Set<() => void>();
 const set = (patch: Partial<UpdateState>) => { state = { ...state, ...patch }; listeners.forEach((l) => l()); };
 
@@ -55,17 +55,16 @@ export function scheduleUpdateChecks(enabled: boolean) {
 /** Re-open the dialog, e.g. from the sidebar button after it was dismissed. */
 export function showUpdatePrompt() { if (state.available) set({ prompt: true }); }
 
-export function dismissUpdate() { set({ prompt: false, installError: null, fallbackPath: null }); }
+export function dismissUpdate() { set({ prompt: false, installError: null, unpacked: null }); }
 
 export async function installUpdate() {
   const u = state.available;
   if (!u?.assetUrl) return;
-  set({ installing: { phase: "downloading", downloaded: 0, total: u.assetSize ?? null }, installError: null, fallbackPath: null });
+  set({ installing: { phase: "downloading", downloaded: 0, total: u.assetSize ?? null }, installError: null, unpacked: null });
   const un = await native.onUpdateProgress((p) => set({ installing: p }));
   try {
-    const out = await native.installUpdate(u.assetUrl);
-    if (!out.installed) set({ installing: null, installError: out.reason ?? "Huddle could not replace itself.", fallbackPath: out.appPath });
-    // When installed, the app quits and relaunches by itself.
+    const out = await native.installUpdate(u.assetUrl, u.version);
+    set({ installing: null, unpacked: out });
   } catch (e) {
     set({ installing: null, installError: String(e instanceof Error ? e.message : e) });
   } finally { un(); }

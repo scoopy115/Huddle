@@ -1,7 +1,9 @@
-//! Update check and self-install. The check asks the GitHub API for the latest release of the
-//! Huddle repository and compares its tag with the running version. Installing downloads the
+//! Update check and download. The check asks the GitHub API for the latest release of the
+//! Huddle repository and compares its tag with the running version. "Download" fetches the
 //! release's `.zip` (which contains `Huddle.app`), unpacks it with `ditto` (keeps symlinks and
-//! signatures), swaps it into the place of the running bundle, and relaunches. A missing
+//! signatures) into `~/Downloads/Huddle <version>/` and reveals it in Finder; the user drags it
+//! into Applications themselves. (Replacing the running bundle in place was tried and dropped:
+//! translocated or read-only locations made it fail in ways users could not act on.) A missing
 //! repository or release (404) simply means "no update" so the check is safe before the first
 //! release exists. The download is written by Huddle itself, so it carries no quarantine flag.
 
@@ -138,11 +140,10 @@ pub struct UpdateProgress {
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct InstallOutcome {
-    /// True when the running bundle was replaced and Huddle is about to relaunch.
-    pub installed: bool,
-    /// Where the unpacked `Huddle.app` sits when it could not be installed automatically.
+    /// The unpacked `Huddle.app`, ready to be dragged into Applications.
     pub app_path: String,
-    pub reason: Option<String>,
+    /// The folder it sits in (`~/Downloads/Huddle <version>`).
+    pub folder: String,
 }
 
 fn emit(app: &AppHandle, phase: &str, downloaded: u64, total: Option<u64>) {
@@ -188,7 +189,7 @@ async fn run(cmd: &str, args: &[&std::ffi::OsStr]) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub async fn install_update(app: AppHandle, asset_url: String) -> Result<InstallOutcome, String> {
+pub async fn install_update(app: AppHandle, asset_url: String, version: String) -> Result<InstallOutcome, String> {
     if !cfg!(target_os = "macos") {
         return Err("Automatic updates are only available on macOS.".into());
     }
@@ -231,45 +232,18 @@ pub async fn install_update(app: AppHandle, asset_url: String) -> Result<Install
     let new_app = find_app(&extracted).ok_or("The download does not contain Huddle.app.")?;
     let _ = run("xattr", &["-dr".as_ref(), "com.apple.quarantine".as_ref(), new_app.as_os_str()]).await;
 
-    // 3. Swap it in for the running bundle.
+    // 3. Put it where the user expects downloads, in a folder named after the version so several
+    //    versions never collide, and show it.
     emit(&app, "installing", downloaded, total);
-    let Some(target) = running_bundle() else {
-        return Ok(InstallOutcome { installed: false, app_path: new_app.display().to_string(), reason: Some("Huddle is not running from an app bundle.".into()) });
-    };
-    let parent = target.parent().ok_or("Bundle has no parent folder")?;
-    let old = parent.join(format!(".{}.old-{}", target.file_name().and_then(|n| n.to_str()).unwrap_or("Huddle.app"), std::process::id()));
-    if let Err(e) = std::fs::rename(&target, &old) {
-        return Ok(InstallOutcome { installed: false, app_path: new_app.display().to_string(), reason: Some(format!("Could not replace {}: {e}", target.display())) });
+    let downloads = app.path().download_dir().unwrap_or_else(|_| std::env::var("HOME").map(|h| PathBuf::from(h).join("Downloads")).unwrap_or_else(|_| dir.clone()));
+    let folder = downloads.join(format!("Huddle {}", version.trim_start_matches('v')));
+    let _ = std::fs::remove_dir_all(&folder);
+    std::fs::create_dir_all(&folder).map_err(|e| format!("Could not create {}: {e}", folder.display()))?;
+    let dest = folder.join("Huddle.app");
+    if std::fs::rename(&new_app, &dest).is_err() {
+        run("ditto", &[new_app.as_os_str(), dest.as_os_str()]).await?;
     }
-    let moved = match std::fs::rename(&new_app, &target) {
-        Ok(()) => Ok(()),
-        // Different volume: copy instead.
-        Err(_) => run("ditto", &[new_app.as_os_str(), target.as_os_str()]).await,
-    };
-    if let Err(e) = moved {
-        let _ = std::fs::rename(&old, &target);
-        return Ok(InstallOutcome { installed: false, app_path: new_app.display().to_string(), reason: Some(format!("Could not install into {}: {e}", parent.display())) });
-    }
-
-    // 4. Relaunch from a detached shell once this process has exited; it also removes the old copy.
-    emit(&app, "relaunching", downloaded, total);
-    std::process::Command::new("/bin/sh")
-        .arg("-c")
-        .arg("sleep 1.5; rm -rf \"$HUDDLE_OLD\"; open \"$HUDDLE_NEW\"")
-        .env("HUDDLE_OLD", &old)
-        .env("HUDDLE_NEW", &target)
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .map_err(|e| format!("Installed, but could not relaunch: {e}"))?;
-    let handle = app.clone();
-    std::thread::spawn(move || {
-        std::thread::sleep(Duration::from_millis(400));
-        if let Some(state) = handle.try_state::<crate::engine::EngineState>() {
-            crate::engine::shutdown(&state);
-        }
-        handle.exit(0);
-    });
-    Ok(InstallOutcome { installed: true, app_path: target.display().to_string(), reason: None })
+    let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::process::Command::new("open").arg("-R").arg(&dest).status();
+    Ok(InstallOutcome { app_path: dest.display().to_string(), folder: folder.display().to_string() })
 }

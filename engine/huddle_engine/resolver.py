@@ -220,7 +220,7 @@ def _auto_llm(ctx: ResolverContext) -> Resolution:
                           provider="ollama", reason=reason, auto_model=best)
     if ollama_state in ("not_found", "installed_not_running"):
         return Resolution(task="llm", status="download_required", provider="ollama", download=_llm_download(ctx),
-                          reason="Huddle installs a small local AI runtime together with this model — nothing to set up.")
+                          reason="Huddle installs a small local AI runtime together with this model.")
     return Resolution(task="llm", status="download_required", provider="ollama", download=_llm_download(ctx),
                       reason="No suitable AI model yet")
 

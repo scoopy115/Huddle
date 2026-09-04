@@ -9,7 +9,7 @@ import { syncShellPrefs } from "@/lib/shellPrefs";
 import { checkForUpdates, scheduleUpdateChecks } from "@/lib/updates";
 import { UpdateDialog } from "@/components/UpdateDialog";
 import { PermissionsReminder } from "@/components/PermissionsReminder";
-import { NavContext, type View } from "@/lib/nav";
+import { AI_MISSING_HINT, NavContext, type View } from "@/lib/nav";
 import type { Meeting, UserSettings } from "@/types/engine";
 import { Sidebar } from "@/components/Sidebar";
 import { CommandPalette } from "@/components/CommandPalette";
@@ -87,7 +87,7 @@ export default function App() {
       case "new-recording": go({ kind: "record" }); break;
       case "import-audio": importAudio(); break;
       case "view-meetings": go({ kind: "meetings" }); break;
-      case "view-ask": go({ kind: "ask" }); break;
+      case "view-ask": if (ai.ready) go({ kind: "ask" }); else setToast(AI_MISSING_HINT); break;
       case "view-actions": go({ kind: "actions" }); break;
       case "view-processes": go({ kind: "processes" }); break;
       case "view-search": setPalette((p) => !p); sounds.open(); break;
@@ -98,7 +98,7 @@ export default function App() {
         });
         break;
     }
-  }, [go, importAudio]);
+  }, [go, importAudio, ai.ready]);
   useEffect(() => {
     let un: (() => void) | undefined;
     native.onMenu(menuAction).then((u) => (un = u));

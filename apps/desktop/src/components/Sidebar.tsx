@@ -21,13 +21,13 @@ function UpdateAvailable() {
 function NavItem({ icon: Icon, label, active, onClick, count, hint, disabled, title }: { icon: LucideIcon; label: string; active: boolean; onClick: () => void; count?: number; hint?: string; disabled?: boolean; title?: string }) {
   return (
     <button
-      onClick={() => { if (!active) sounds.nav(); onClick(); }}
+      onClick={() => { if (disabled) return; if (!active) sounds.nav(); onClick(); }}
       title={title}
       aria-disabled={disabled || undefined}
       className={cn(
         "pressable group relative flex w-full items-center gap-2.5 rounded-lg px-2.5 py-[7px] text-[13px] font-medium",
         active ? "bg-surface text-fg shadow-[0_1px_2px_rgb(28_25_24/0.06)] dark:bg-fg/[0.07] dark:shadow-none" : "text-fg/65 hover:bg-fg/[0.04] hover:text-fg",
-        disabled && "opacity-45 saturate-0",
+        disabled && "cursor-not-allowed opacity-45 saturate-0 hover:bg-transparent hover:text-fg/65",
       )}
     >
       {/* Active marker: the brand's red tick, like the one in section titles. */}

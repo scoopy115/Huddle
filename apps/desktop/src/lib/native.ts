@@ -132,7 +132,7 @@ const desktop = {
   copyFile: (src: string, dst: string) => invoke<number>("copy_file", { src, dst }),
   appInfo: () => invoke<AppInfo>("app_info"),
   checkForUpdates: () => invoke<UpdateCheck>("check_for_updates"),
-  installUpdate: (assetUrl: string) => invoke<InstallOutcome>("install_update", { assetUrl }),
+  installUpdate: (assetUrl: string, version: string) => invoke<InstallOutcome>("install_update", { assetUrl, version }),
   onUpdateProgress: (cb: (p: UpdateProgress) => void): Promise<UnlistenFn> => listen<UpdateProgress>("update:progress", (ev) => cb(ev.payload)),
   onRecordingStarted: (cb: (m: RecordingMeta) => void): Promise<UnlistenFn> => listen<RecordingMeta>("recording:started", (ev) => cb(ev.payload)),
   onRecordingStopped: (cb: (m: RecordingMeta) => void): Promise<UnlistenFn> => listen<RecordingMeta>("recording:stopped", (ev) => cb(ev.payload)),
@@ -164,6 +164,6 @@ export interface AppInfo { version: string; build: string; bundlePath: string | 
 export interface UpdateInfo { version: string; notes: string; pageUrl: string; assetUrl: string | null; assetName: string | null; assetSize: number | null }
 export interface UpdateCheck { currentVersion: string; update: UpdateInfo | null }
 export interface UpdateProgress { phase: string; downloaded: number; total: number | null }
-export interface InstallOutcome { installed: boolean; appPath: string; reason: string | null }
+export interface InstallOutcome { appPath: string; folder: string }
 
 export const native = desktop;

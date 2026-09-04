@@ -393,8 +393,8 @@ function Models({ settings, env, resolutions, update, reload }: { settings: User
       {tab === "summaries" && (
         <>
           {ollama?.status !== "available" && (
-            <div className="mb-2 rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-[12.5px]">
-              {ollama?.status === "installed_not_running" ? "Ollama is installed but not running. Start it to use or download AI models." : "Ollama is not installed. Get it from ollama.com — Huddle will then download a model for you."}
+            <div className="mb-3 rounded-lg border border-border bg-bg px-3 py-2.5 text-[12.5px] text-muted">
+              No AI runtime on this Mac yet. Huddle downloads its own (about 150 MB) together with the first model you pick below; nothing to install by hand.
             </div>
           )}
           <Card>
@@ -547,7 +547,7 @@ function Advanced({ settings, env, engine, update, resolutions }: { settings: Us
               <Button size="sm" onClick={() => native.engineRestart()}>Restart</Button>
             </Row>
             <Row label="AI provider" hint={`Ollama${aiRes?.model ? ` · ${aiRes.model.name}` : ""}`}>
-              <Badge tone={ollama?.status === "available" ? "good" : "bad"}>{ollama?.status === "available" ? "running" : (ollama?.status ?? "unknown").replace(/_/g, " ")}</Badge>
+              <Badge tone={ollama?.status === "available" ? "good" : "neutral"}>{ollama?.status === "available" ? "available" : "installed with the first model"}</Badge>
               <Button size="sm" onClick={async () => { await api.rescan(); }}>Reconnect</Button>
             </Row>
           </Card>
