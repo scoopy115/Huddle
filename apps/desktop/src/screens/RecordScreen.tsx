@@ -105,7 +105,7 @@ export function RecordScreen({
 
   useEffect(() => { raf.current = requestAnimationFrame(draw); return () => cancelAnimationFrame(raf.current); }, [draw]);
 
-  const permissionOk = !systemAudio || support?.permission === "granted";
+  const permissionOk = !systemAudio || support?.supported !== false;
 
   const start = async () => {
     setError(null);
@@ -119,10 +119,7 @@ export function RecordScreen({
       api.liveStart(m.id, m.filePath).then(setLive).catch(() => { /* live text is best-effort */ });
     } catch (e) {
       const msg = errorMessage(e);
-      if (msg.includes("permission-denied")) {
-        setError("Allow “Screen & System Audio Recording” for Huddle in System Settings → Privacy & Security, then try again.");
-        refreshSupport();
-      } else setError(msg);
+      setError(msg);
     } finally { setBusy(false); }
   };
 
@@ -202,18 +199,10 @@ export function RecordScreen({
                 {SPEAKER_COUNT_OPTIONS.map((n) => <option key={n} value={n}>{speakerCountLabel(n)}</option>)}
               </Select>
             </label>
-            {systemAudio && support && support.permission !== "granted" && (
-              <div className="rounded-lg border border-border bg-bg px-3 py-2.5 text-[12.5px]">
-                <div className="mb-2">{support.supported ? "macOS needs your permission to record the audio of other apps (Screen & System Audio Recording)." : support.message}</div>
-                {support.supported && (
-                  <div className="flex gap-2">
-                    <Button size="sm" variant="primary" onClick={async () => setSupport(await native.requestSystemAudioPermission())}>Allow</Button>
-                    <Button size="sm" variant="ghost" onClick={() => native.openSystemAudioSettings()}>Open System Settings</Button>
-                  </div>
-                )}
-              </div>
+            {systemAudio && support && !support.supported && (
+              <div className="rounded-lg border border-border bg-bg px-3 py-2.5 text-[12.5px]">{support.message}</div>
             )}
-            <Button variant="record" size="lg" loading={busy} onClick={start} className="mt-1 rounded-full" disabled={!permissionOk && !!support?.supported}>
+            <Button variant="record" size="lg" loading={busy} onClick={start} className="mt-1 rounded-full" disabled={!permissionOk}>
               <span className="h-2.5 w-2.5 rounded-full bg-white" /> Start Recording
             </Button>
           </div>

@@ -17,6 +17,7 @@ window to 30 s, so long chunks keep CPU cost near one encoder pass per ~28 s of 
 """
 from __future__ import annotations
 
+import gc
 import logging
 import math
 import traceback
@@ -50,6 +51,38 @@ def vocab_prompt(terms: list[str], limit: int = 60) -> str | None:
     way the user writes them. Capped so it never crowds the context window."""
     terms = [t.strip() for t in terms if t and t.strip()][:limit]
     return ("Glossary of names and terms: " + ", ".join(terms) + ".") if terms else None
+
+
+def release_models() -> None:
+    """Drop every cached model so an idle engine holds no model memory.
+
+    faster-whisper models are created per call and die with their provider, but mlx_whisper keeps
+    the last model in a module-level holder and MLX keeps freed Metal buffers in its own cache;
+    together they left several GB resident between meetings. Safe to call at any time."""
+    freed = 0
+    try:
+        import importlib
+        import sys
+
+        if "mlx_whisper.transcribe" in sys.modules:
+            holder = importlib.import_module("mlx_whisper.transcribe").ModelHolder
+            holder.model = None
+            holder.model_path = None
+        if "mlx.core" in sys.modules:
+            import mlx.core as mx
+            before = mx.get_active_memory() + mx.get_cache_memory()
+            mx.clear_cache()
+            freed = before - (mx.get_active_memory() + mx.get_cache_memory())
+    except Exception:  # never let housekeeping fail a job
+        log.debug("model release skipped", exc_info=True)
+    gc.collect()
+    try:
+        import mlx.core as mx  # a second pass: gc may have dropped the last references to buffers
+        mx.clear_cache()
+    except Exception:
+        pass
+    if freed:
+        log.info("released %.1f GB of model memory", freed / 1024**3)
 
 
 def load_whisper(model_name: str, device: str = "auto", compute_type: str | None = None):

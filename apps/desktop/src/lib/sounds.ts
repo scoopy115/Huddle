@@ -51,9 +51,9 @@ export const sounds = {
   toggleOn() { tone(660, { dur: 0.06, gain: 0.05 }); tone(990, { dur: 0.09, gain: 0.05, at: 0.045 }); },
   toggleOff() { tone(990, { dur: 0.06, gain: 0.05 }); tone(660, { dur: 0.09, gain: 0.05, at: 0.045 }); },
   /** Recording starts: two rising notes. */
-  recordStart() { tone(523, { dur: 0.11, gain: 0.07 }); tone(784, { dur: 0.16, gain: 0.07, at: 0.1 }); },
+  recordStart() { tone(523, { dur: 0.11, gain: 0.13 }); tone(784, { dur: 0.16, gain: 0.13, at: 0.1 }); },
   /** Recording stops: the same two notes, falling. */
-  recordStop() { tone(784, { dur: 0.11, gain: 0.07 }); tone(523, { dur: 0.18, gain: 0.07, at: 0.1 }); },
+  recordStop() { tone(784, { dur: 0.11, gain: 0.13 }); tone(523, { dur: 0.18, gain: 0.13, at: 0.1 }); },
   /** A meeting finished processing: a small three-note chime. */
   success() { tone(659, { dur: 0.11, gain: 0.06 }); tone(880, { dur: 0.11, gain: 0.06, at: 0.1 }); tone(1319, { dur: 0.24, gain: 0.06, at: 0.2 }); },
   /** Something went wrong: a low, soft double thud. */

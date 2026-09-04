@@ -26,3 +26,9 @@ pub fn reveal_in_finder(path: String) -> Result<(), String> {
         Err(e) => Err(e.to_string()),
     }
 }
+
+/// Copy a file the engine owns (a meeting's audio) to a path the user picked in the save dialog.
+#[tauri::command]
+pub fn copy_file(src: String, dst: String) -> Result<u64, String> {
+    std::fs::copy(&src, &dst).map_err(|e| format!("Could not copy to {dst}: {e}"))
+}

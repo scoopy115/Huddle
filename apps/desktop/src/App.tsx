@@ -5,6 +5,10 @@ import { api, errorMessage } from "@/lib/api";
 import { isTauri, native, type EngineStatus, type RecordingMeta } from "@/lib/native";
 import { setSoundsEnabled, sounds } from "@/lib/sounds";
 import { syncNetworkProxy } from "@/lib/mcpProxy";
+import { syncShellPrefs } from "@/lib/shellPrefs";
+import { checkForUpdates, scheduleUpdateChecks } from "@/lib/updates";
+import { UpdateDialog } from "@/components/UpdateDialog";
+import { PermissionsReminder } from "@/components/PermissionsReminder";
 import { NavContext, type View } from "@/lib/nav";
 import type { Meeting, UserSettings } from "@/types/engine";
 import { Sidebar } from "@/components/Sidebar";
@@ -67,6 +71,12 @@ export default function App() {
       case "view-actions": go({ kind: "actions" }); break;
       case "view-processes": go({ kind: "processes" }); break;
       case "view-search": setPalette((p) => !p); sounds.open(); break;
+      case "check-updates":
+        checkForUpdates({ manual: true }).then((s) => {
+          if (s.error) setToast(`Could not check for updates: ${s.error}`);
+          else if (!s.available) setToast(`Huddle ${s.currentVersion} is up to date.`);
+        });
+        break;
     }
   }, [go, importAudio]);
   useEffect(() => {
@@ -81,6 +91,42 @@ export default function App() {
     window.addEventListener("keydown", onKey);
     return () => { un?.(); window.removeEventListener("keydown", onKey); };
   }, [menuAction]);
+
+  // Recordings started from the menu bar or ⌥⌘R: the shell records, the UI turns the result into
+  // a meeting once the engine is up. `recording:stopped` wakes a visible window; the pending
+  // queue covers the case where the window was hidden or the engine was stopped meanwhile.
+  const submitPending = useCallback(async () => {
+    if (engine.state !== "ready") return;
+    const list = await native.takePendingRecordings().catch(() => [] as RecordingMeta[]);
+    for (const r of list) {
+      if (r.status !== "saved" || r.durationSec < 1) { if (r.error) setToast(r.error); continue; }
+      try {
+        const meeting = await api.createFromRecording({ id: r.id, filePath: r.filePath, systemFilePath: r.systemFilePath ?? null, startedAt: r.startedAt, durationSec: r.durationSec, inputDevice: r.inputDevice, sampleRate: r.sampleRate, channels: r.channels, format: r.format, source: "recorded", process: true });
+        await refreshMeetings();
+        go({ kind: "meeting", id: meeting.id });
+      } catch (e) { setToast(errorMessage(e)); }
+    }
+  }, [engine.state, go, refreshMeetings]);
+  useEffect(() => { submitPending(); }, [submitPending]);
+  useEffect(() => {
+    const uns: (() => void)[] = [];
+    // The shell plays the chimes for recordings it started itself.
+    native.onRecordingStarted(() => setRecording(true)).then((u) => uns.push(u));
+    native.onRecordingStopped(() => { setRecording(false); submitPending(); }).then((u) => uns.push(u));
+    return () => uns.forEach((u) => u());
+  }, [submitPending]);
+  useEffect(() => {
+    let un: (() => void) | undefined;
+    native.onShellPrefsChanged((p) => {
+      const patch = { "recording.inputDevice": p.inputDevice, "recording.systemAudio": p.systemAudio } as Partial<UserSettings>;
+      // Mirror everything the shell knows, so this copy never lags the Settings screen (a stale
+      // `general.sounds` here used to switch sounds back on right after they were turned off).
+      setSettings((s) => (s ? { ...s, ...patch, "general.sounds": p.sounds, "general.menuBar": p.menuBar } : s));
+      api.updateSettings(patch).catch(() => {});
+    }).then((u) => (un = u));
+    return () => un?.();
+  }, []);
+  useEffect(() => { if (settings) scheduleUpdateChecks(settings["general.autoUpdate"] !== false); }, [settings]);
 
   // Sounds follow the setting; a meeting that finishes processing gets a small chime.
   useEffect(() => { if (settings) setSoundsEnabled(settings["general.sounds"] !== false); }, [settings]);
@@ -110,7 +156,17 @@ export default function App() {
     if (engine.state !== "ready") return;
     (async () => {
       try {
-        const s = await api.getSettings();
+        let s = await api.getSettings();
+        // Shell prefs: the shell owns the recording choice (the menu-bar popover can change it
+        // while the engine sleeps), the engine owns the menu-bar toggle.
+        try {
+          const sp = await native.getShellPrefs();
+          native.setShellPrefs({ menuBar: s["general.menuBar"] !== false, sounds: s["general.sounds"] !== false }).catch(() => {});
+          const patch: Partial<UserSettings> = {};
+          if ((sp.inputDevice ?? null) !== (s["recording.inputDevice"] ?? null)) patch["recording.inputDevice"] = sp.inputDevice;
+          if (sp.systemAudio !== !!s["recording.systemAudio"]) patch["recording.systemAudio"] = sp.systemAudio;
+          if (Object.keys(patch).length) s = await api.updateSettings(patch);
+        } catch { /* browser dev */ }
         setSettings(s);
         setOnboarded(Boolean(s["onboarding.completed"]));
       } catch (e) { setToast(errorMessage(e)); }
@@ -135,11 +191,16 @@ export default function App() {
 
   const openActions = useMemo(() => meetings?.reduce((n, m) => n + m.openActionCount, 0) ?? 0, [meetings]);
   const running = useMemo(() => meetings?.filter((m) => m.status === "processing").length ?? 0, [meetings]);
+  useEffect(() => { native.setTrayBusy(running > 0).catch(() => {}); }, [running]);
 
   const recover = async (keep: boolean) => {
     const list = unfinished;
     setUnfinished([]);
-    if (!keep) return;
+    if (!keep) {
+      // Dismissing is a decision: the files go, so the prompt does not come back on every launch.
+      native.discardUnfinishedRecordings(list.map((r) => r.id)).catch(() => {});
+      return;
+    }
     for (const r of list) {
       try {
         await api.createFromRecording({ id: r.id, filePath: r.filePath, systemFilePath: r.systemFilePath ?? null, startedAt: r.startedAt, durationSec: r.durationSec, inputDevice: r.inputDevice, sampleRate: r.sampleRate, channels: r.channels, format: r.format, source: "recovered", title: "Recovered recording", process: true });
@@ -166,7 +227,7 @@ export default function App() {
       return (
         <div className="flex h-full flex-col items-center justify-center gap-4 text-[13px] text-muted">
           <BrandMark className="h-12 w-12 text-accent animate-record" />
-          <span className="inline-flex items-center gap-2"><Spinner /> Starting local engine…</span>
+          <span className="inline-flex items-center gap-2"><Spinner /> Loading…</span>
         </div>
       );
     }
@@ -174,7 +235,7 @@ export default function App() {
     switch (view.kind) {
       case "meetings": return <MeetingsScreen meetings={meetings} loading={loading} onImport={importAudio} onChanged={refreshMeetings} />;
       case "meeting": return <MeetingScreen id={view.id} seek={view.seek} segmentId={view.segmentId} nonce={view.nonce} onChanged={refreshMeetings} />;
-      case "record": return settings ? <RecordScreen settings={settings} onSettings={(p) => { setSettings((s) => (s ? { ...s, ...p } : s)); api.updateSettings(p).catch(() => {}); }} onRecordingStateChange={setRecording} /> : null;
+      case "record": return settings ? <RecordScreen settings={settings} onSettings={(p) => { setSettings((s) => (s ? { ...s, ...p } : s)); api.updateSettings(p).catch(() => {}); syncShellPrefs(p); }} onRecordingStateChange={setRecording} /> : null;
       case "search": return <SearchScreen initialQuery={view.query} nonce={view.nonce} />;
       case "ask": return <AskScreen meetings={meetings ?? []} />;
       case "processes": return <ProcessesScreen onChanged={refreshMeetings} />;
@@ -196,9 +257,11 @@ export default function App() {
         </main>
       </div>
       {engine.state === "ready" && onboarded && <CommandPalette open={palette} onClose={() => setPalette(false)} meetings={meetings ?? []} />}
+      <UpdateDialog />
+      {onboarded && <PermissionsReminder />}
       <Dialog open={unfinished.length > 0} onClose={() => recover(false)} title="Recover unfinished recording?"
-        footer={<><Button onClick={() => recover(false)}>Not now</Button><Button variant="primary" onClick={() => recover(true)}>Recover and process</Button></>}>
-        Huddle closed while {unfinished.length === 1 ? "a recording was" : `${unfinished.length} recordings were`} in progress. The audio up to the last second was saved to disk and can be processed now.
+        footer={<><Button onClick={() => recover(false)}>Discard</Button><Button variant="primary" onClick={() => recover(true)}>Recover and process</Button></>}>
+        Huddle closed while {unfinished.length === 1 ? "a recording was" : `${unfinished.length} recordings were`} in progress. The audio up to the last second was saved to disk and can be processed now, or discarded for good.
       </Dialog>
     </NavContext.Provider>
   );

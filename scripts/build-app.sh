@@ -31,3 +31,13 @@ done < <(find "$DIST" -type l -print0)
 echo "restored $restored symlinks inside $ENGINE"
 du -sh "$APP" | cut -f1
 echo "Built $APP"
+
+# Tauri signs the bundle before the resources are complete (and the symlink restore above changes
+# them), so the seal no longer matches. Re-sign ad hoc so `codesign -v` passes and a zipped copy
+# opens on another Mac without the "damaged" dialog.
+# Prefer a stable identity (HUDDLE_SIGN_IDENTITY, e.g. a self-signed "Huddle Dev" certificate or a
+# Developer ID): macOS ties Microphone and Screen Recording permissions to the signature, and an
+# ad-hoc signature changes with every build, so permissions are reset after each install.
+IDENTITY="${HUDDLE_SIGN_IDENTITY:--}"
+codesign --force --deep --sign "$IDENTITY" "$APP" 2>&1 | grep -v "replacing existing signature" || true
+codesign -v "$APP" && echo "signature ok: $APP"

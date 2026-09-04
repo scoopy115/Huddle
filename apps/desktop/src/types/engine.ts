@@ -351,6 +351,8 @@ export type UserSettings = Record<string, unknown> & {
   "general.appearance"?: "system" | "light" | "dark";
   "general.uiLanguage": string;
   "general.sounds": boolean;
+  "general.menuBar": boolean;
+  "general.autoUpdate": boolean;
   "notes.autoActionItems": boolean;
   "general.computeDevice": string;
   "storage.maxBytes": number;

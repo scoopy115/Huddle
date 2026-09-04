@@ -19,6 +19,7 @@ from typing import Any
 from ..db import Database
 from ..discovery.registry import Registry
 from ..providers.base import ProviderError
+from ..providers.transcription import release_models
 from ..schemas import DEFAULT_PIPELINE, STAGES
 from ..settings import EngineConfig
 from . import stages as st
@@ -102,6 +103,9 @@ class JobRunner:
                 log.exception("job runner crashed on %s", meeting_id)
             finally:
                 self._active = None
+                if self._q.empty():
+                    # Idle: give the memory back instead of keeping models warm indefinitely.
+                    release_models()
 
     def _run(self, meeting_id: str, names: list[str]) -> None:
         self._cancelled.discard(meeting_id)

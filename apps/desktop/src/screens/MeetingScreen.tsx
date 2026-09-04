@@ -181,7 +181,7 @@ export function MeetingScreen({ id, seek, segmentId, nonce, onChanged }: { id: s
             </div>
           )}
 
-          {d.segments.length > 0 && (
+          {d.segments.length > 0 && d.summary && !processing && (
             <section className="mt-5">
               <SectionTitle>Ask this meeting</SectionTitle>
               <div className="flex gap-2">

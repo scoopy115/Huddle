@@ -108,4 +108,4 @@ def test_api_keys_hash_only(db):
 def test_settings_migration_renames_old_keys():
     s = normalize_settings({"transcription.language": "nl", "ai.model": "ollama:x", "unknown.key": 1, "junk": 2})
     assert s["general.language"] == "nl" and s["models.ai"] == "ollama:x" and s["unknown.key"] == 1
-    assert "junk" not in s and s["storage.maxBytes"] == 20 * 1024 ** 3
+    assert "junk" not in s and s["storage.maxBytes"] == 10 * 1024 ** 3

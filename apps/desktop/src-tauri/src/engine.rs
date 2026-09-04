@@ -269,6 +269,43 @@ async fn spawn(app: &AppHandle, data_dir: PathBuf) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Start the engine if it is not running (menu-bar mode stops it while idle).
+pub fn ensure_running(app: &AppHandle) {
+    let state = app.state::<EngineState>();
+    let running = state.inner.lock().ok().map(|g| g.as_ref().map(|i| i.status.state == "ready" || i.status.state == "starting").unwrap_or(false)).unwrap_or(false);
+    if running {
+        return;
+    }
+    if let Ok(data_dir) = crate::paths::data_dir(app) {
+        log::info!("starting engine on demand");
+        spawn_on_startup(app.clone(), data_dir);
+    }
+}
+
+/// Stop the engine when nothing is processing — used when the window hides into the menu bar,
+/// so a Mac with Huddle "running" in the background does not keep a gigabyte of models resident.
+pub fn stop_if_idle(app: &AppHandle) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let state = app.state::<EngineState>();
+        let (port, tok) = match state.inner.lock().ok().and_then(|g| g.as_ref().map(|i| (i.port, i.token.clone()))) {
+            Some(x) => x,
+            None => return,
+        };
+        let client = match reqwest::Client::builder().timeout(Duration::from_secs(2)).build() { Ok(c) => c, Err(_) => return };
+        let idle = match client.get(format!("http://127.0.0.1:{port}/health")).bearer_auth(&tok).send().await {
+            Ok(r) => r.json::<Value>().await.map(|v| v.get("activeJob").map(|j| j.is_null()).unwrap_or(true)).unwrap_or(false),
+            Err(_) => true,
+        };
+        if idle {
+            log::info!("window hidden and engine idle — stopping engine");
+            shutdown(&state);
+            let st = set_status(&state, |s| { s.state = "stopped".into(); s.port = None; });
+            let _ = app.emit("engine:status", st);
+        }
+    });
+}
+
 pub fn shutdown(state: &EngineState) {
     if let Ok(mut g) = state.inner.lock() {
         if let Some(inner) = g.as_mut() {

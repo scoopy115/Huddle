@@ -71,9 +71,11 @@ DEFAULT_USER_SETTINGS: dict[str, Any] = {
     "general.uiLanguage": "auto",            # language of summaries/answers; "auto" = system language, English if unsupported
     "general.computeDevice": "auto",
     "general.sounds": True,                  # subtle interface sounds
+    "general.menuBar": True,                 # keep Huddle in the menu bar when the window is closed
+    "general.autoUpdate": True,              # check GitHub releases on launch and every 24 hours
     "notes.autoActionItems": False,          # extract action items automatically after every meeting
     # storage
-    "storage.maxBytes": 20 * GB,             # recordings quota (5–50 GB); transcripts are never deleted
+    "storage.maxBytes": 10 * GB,             # recordings quota (5–50 GB); transcripts are never deleted
     "paths.modelsDir": None,                 # None = <data>/models
     "paths.logsDir": None,                   # None = <data>/logs
     # recording

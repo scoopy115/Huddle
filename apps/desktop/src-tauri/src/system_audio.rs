@@ -13,8 +13,8 @@ use serde::Serialize;
 #[derive(Serialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct SystemAudioSupport {
-    pub supported: bool,        // helper present and macOS 13+
-    pub permission: String,     // granted | denied | unknown
+    pub supported: bool,        // helper present and macOS 14.2+
+    pub permission: String,     // always "unknown": macOS exposes no query for it
     pub message: Option<String>,
 }
 
@@ -36,29 +36,68 @@ fn helper_path() -> Option<PathBuf> {
     None
 }
 
-pub fn support() -> SystemAudioSupport {
-    if !cfg!(target_os = "macos") {
-        return SystemAudioSupport { supported: false, permission: "unknown".into(), message: Some("System audio capture is only available on macOS for now.".into()) };
-    }
-    let Some(helper) = helper_path() else {
-        return SystemAudioSupport { supported: false, permission: "unknown".into(), message: Some("The system audio helper is missing from this build.".into()) };
-    };
-    let out = Command::new(&helper).arg("check").output();
-    match out {
-        Ok(o) => {
-            let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
-            SystemAudioSupport { supported: true, permission: if s == "granted" { "granted".into() } else { "denied".into() }, message: None }
-        }
-        Err(e) => SystemAudioSupport { supported: false, permission: "unknown".into(), message: Some(format!("Helper failed: {e}")) },
+/// Microphone permission as macOS records it for Huddle: "granted" | "denied" | "undetermined".
+fn mic_state(arg: &str) -> String {
+    let Some(helper) = helper_path() else { return "unknown".into() };
+    match Command::new(helper).arg(arg).output() {
+        Ok(o) => String::from_utf8_lossy(&o.stdout).trim().to_string(),
+        Err(_) => "unknown".into(),
     }
 }
 
-/// Trigger the macOS permission prompt (only shows once; afterwards the user must use System Settings).
+#[tauri::command]
+pub async fn microphone_permission() -> String {
+    tauri::async_runtime::spawn_blocking(|| mic_state("mic-check")).await.unwrap_or_else(|_| "unknown".into())
+}
+
+/// Shows the macOS microphone prompt (once); returns the resulting state.
+#[tauri::command]
+pub async fn request_microphone_permission() -> String {
+    tauri::async_runtime::spawn_blocking(|| mic_state("mic-request")).await.unwrap_or_else(|_| "unknown".into())
+}
+
+#[tauri::command]
+pub fn open_microphone_settings() -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    std::process::Command::new("open")
+        .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")
+        .status()
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Whether system audio capture is available at all (helper present, macOS 14.2+). macOS has no
+/// API for the "System Audio Recording Only" permission itself, so `permission` is "unknown";
+/// the UI points to System Settings instead of pretending to know.
+pub fn support() -> SystemAudioSupport {
+    if !cfg!(target_os = "macos") {
+        return SystemAudioSupport { supported: false, permission: "unknown".into(), message: Some("System audio capture is only available on macOS 14.2 or newer.".into()) };
+    }
+    if helper_path().is_none() {
+        return SystemAudioSupport { supported: false, permission: "unknown".into(), message: Some("The system audio helper is missing from this build.".into()) };
+    }
+    SystemAudioSupport { supported: true, permission: "unknown".into(), message: None }
+}
+
+/// Creating a tap is what makes macOS ask (once, while undetermined); harmless afterwards.
 pub fn request_permission() -> SystemAudioSupport {
     if let Some(helper) = helper_path() {
         let _ = Command::new(helper).arg("request").output();
     }
     support()
+}
+
+#[tauri::command]
+pub fn system_audio_support() -> SystemAudioSupport {
+    support()
+}
+
+#[tauri::command]
+pub async fn request_system_audio_permission(app: tauri::AppHandle) -> SystemAudioSupport {
+    if crate::recording::is_recording(&app) {
+        return support();
+    }
+    tauri::async_runtime::spawn_blocking(request_permission).await.unwrap_or_else(|_| support())
 }
 
 pub struct SystemTap {
@@ -139,21 +178,11 @@ impl SystemTap {
 }
 
 #[tauri::command]
-pub fn system_audio_support() -> SystemAudioSupport {
-    support()
-}
-
-#[tauri::command]
-pub fn request_system_audio_permission() -> SystemAudioSupport {
-    request_permission()
-}
-
-#[tauri::command]
 pub fn open_system_audio_settings() -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
         Command::new("open")
-            .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")
+            .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_AudioCapture")
             .status()
             .map_err(|e| e.to_string())?;
     }

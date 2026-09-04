@@ -3,12 +3,15 @@ import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { Check, Cpu, Download, FolderOpen, HardDrive, Mic, RefreshCw, Sparkles, Star, Trash2, Users, Zap } from "lucide-react";
 import { applyAppearance, type Appearance } from "@/lib/theme";
 import { setSoundsEnabled } from "@/lib/sounds";
+import { syncShellPrefs } from "@/lib/shellPrefs";
+import { checkForUpdates, useUpdates } from "@/lib/updates";
 import { api, errorMessage } from "@/lib/api";
-import { isTauri, native, type EngineStatus, type InputDevice, type SystemAudioSupport } from "@/lib/native";
+import { isTauri, native, type AppInfo, type EngineStatus, type InputDevice } from "@/lib/native";
+import { PermissionsPanel, usePermissions } from "@/components/PermissionsPanel";
 import type { DownloadCandidate, DownloadProgress, Environment, KnownSpeaker, LocalModel, Resolution, StorageInfo, UserSettings } from "@/types/engine";
 import { fmtBytes, languageName } from "@/lib/format";
 import { languageOptions, systemLanguage } from "@/lib/languages";
-import { cn } from "@/lib/utils";
+import { cn, modKey } from "@/lib/utils";
 import { Badge, Button, Card, DangerDialog, Dialog, InfoTip, Row, Select, Switch } from "@/components/ui";
 import { McpSection } from "@/screens/settings/McpSection";
 
@@ -42,6 +45,7 @@ export function SettingsScreen({ section, engine }: { section?: string; engine: 
   const update: Update = async (patch) => {
     try {
       setSettings(await api.updateSettings(patch));
+      syncShellPrefs(patch);
       const plan = await api.setupPlan();
       setResolutions(plan.resolutions);
     } catch (e) { setError(errorMessage(e)); }
@@ -120,7 +124,7 @@ function useSystemDark() {
 function General({ settings, update }: { settings: UserSettings; update: Update }) {
   const [storage, setStorage] = useState<StorageInfo | null>(null);
   useEffect(() => { api.storage().then(setStorage).catch(() => {}); }, [settings]);
-  const gb = Math.round((settings["storage.maxBytes"] || 20 * GB) / GB);
+  const gb = Math.round((settings["storage.maxBytes"] || 10 * GB) / GB);
   const [pending, setPending] = useState(gb);
   useEffect(() => setPending(gb), [gb]);
   const systemDark = useSystemDark();
@@ -138,6 +142,21 @@ function General({ settings, update }: { settings: UserSettings; update: Update 
         <Row label="Interface sounds" info="Soft taps and chimes for buttons, recording start and stop, and finished meetings.">
           <Switch checked={settings["general.sounds"] !== false} onChange={(v) => { setSoundsEnabled(v); update({ "general.sounds": v }); }} />
         </Row>
+      </Card>
+
+      <h3 className="mb-2 mt-6 font-display text-[11.5px] font-bold uppercase tracking-wider text-muted">Menu bar</h3>
+      <Card>
+        <Row label="Keep Huddle in the menu bar" hint={`Closing the window keeps a small recorder in the menu bar. ${modKey}⌥R starts or stops a recording from anywhere.`}>
+          <Switch checked={!!settings["general.menuBar"]} onChange={(v) => update({ "general.menuBar": v })} />
+        </Row>
+      </Card>
+
+      <h3 className="mb-2 mt-6 font-display text-[11.5px] font-bold uppercase tracking-wider text-muted">Updates</h3>
+      <Card>
+        <Row label="Check for updates automatically">
+          <Switch checked={settings["general.autoUpdate"] !== false} onChange={(v) => update({ "general.autoUpdate": v })} />
+        </Row>
+        <UpdateRow />
       </Card>
 
       <h3 className="mb-2 mt-6 font-display text-[11.5px] font-bold uppercase tracking-wider text-muted">Notes</h3>
@@ -183,37 +202,30 @@ function General({ settings, update }: { settings: UserSettings; update: Update 
 
 function Recording({ settings, update }: { settings: UserSettings; update: Update }) {
   const [devices, setDevices] = useState<InputDevice[]>([]);
-  const [support, setSupport] = useState<SystemAudioSupport | null>(null);
-  const refresh = () => native.systemAudioSupport().then(setSupport).catch(() => {});
-  useEffect(() => { native.listInputDevices().then(setDevices).catch(() => {}); refresh(); }, []);
+  const perms = usePermissions();
+  useEffect(() => { native.listInputDevices().then(setDevices).catch(() => {}); }, []);
   const mics = devices.filter((d) => !d.isLoopback);
   const def = mics.find((d) => d.isDefault);
   return (
-    <Card>
-      <Row label="Microphone">
-        <Select value={settings["recording.inputDevice"] ?? ""} onChange={(e) => update({ "recording.inputDevice": e.target.value || null })}>
-          <option value="">{autoLabel(def?.name)}</option>
-          {mics.map((d) => <option key={d.id} value={d.name}>{d.name}</option>)}
-        </Select>
-      </Row>
-      <Row label="System audio">
-        <Select value={settings["recording.systemAudio"] ? "all" : "off"} onChange={(e) => { const v = e.target.value === "all"; update({ "recording.systemAudio": v }); if (v) refresh(); }}>
-          <option value="off">Off</option>
-          <option value="all">All apps (online meetings, calls)</option>
-        </Select>
-      </Row>
-      {settings["recording.systemAudio"] && support && (
-        <Row label="Permission" hint={support.permission === "granted" ? "Granted" : support.supported ? "Huddle needs “Screen & System Audio Recording” in System Settings → Privacy & Security." : support.message ?? ""}>
-          {support.permission === "granted" ? <Badge tone="good"><Check className="h-3 w-3" /> Allowed</Badge> : (
-            <>
-              <Button size="sm" onClick={async () => { setSupport(await native.requestSystemAudioPermission()); }}>Allow</Button>
-              <Button size="sm" variant="ghost" onClick={() => native.openSystemAudioSettings()}>Open System Settings</Button>
-            </>
-          )}
+    <>
+      <Card>
+        <Row label="Microphone">
+          <Select value={settings["recording.inputDevice"] ?? ""} onChange={(e) => update({ "recording.inputDevice": e.target.value || null })}>
+            <option value="">{autoLabel(def?.name)}</option>
+            {mics.map((d) => <option key={d.id} value={d.name}>{d.name}</option>)}
+          </Select>
         </Row>
-      )}
-      <Row label="Format"><span className="text-[12.5px] text-muted">WAV, 16-bit, mono</span></Row>
-    </Card>
+        <Row label="System audio">
+          <Select value={settings["recording.systemAudio"] ? "all" : "off"} onChange={(e) => update({ "recording.systemAudio": e.target.value === "all" })}>
+            <option value="off">Off</option>
+            <option value="all">All apps (online meetings, calls)</option>
+          </Select>
+        </Row>
+        <Row label="Format"><span className="text-[12.5px] text-muted">WAV, 16-bit, mono</span></Row>
+      </Card>
+      <h3 className="mb-2 mt-6 font-display text-[11.5px] font-bold uppercase tracking-wider text-muted">Permissions</h3>
+      <PermissionsPanel perms={perms} compact />
+    </>
   );
 }
 
@@ -463,6 +475,21 @@ function Privacy({ settings, update }: { settings: UserSettings; update: Update 
   );
 }
 
+function UpdateRow() {
+  const u = useUpdates();
+  const [touched, setTouched] = useState(false);
+  const status = u.checking ? "Checking…"
+    : !touched ? ""
+    : u.error ? `Could not check: ${u.error}`
+    : u.available ? `Huddle ${u.available.version} is available.`
+    : u.checkedAt ? `You have the latest version${u.currentVersion ? ` (${u.currentVersion})` : ""}.` : "";
+  return (
+    <Row label="Update Huddle" hint={status}>
+      {isTauri() && <Button size="sm" loading={u.checking} onClick={() => { setTouched(true); checkForUpdates({ manual: true }); }}><RefreshCw className="h-3.5 w-3.5" /> Check for updates</Button>}
+    </Row>
+  );
+}
+
 // ---- Advanced -------------------------------------------------------------------------------------
 
 function Advanced({ settings, env, engine, update, resolutions }: { settings: UserSettings; env: Environment; engine: EngineStatus; update: Update; resolutions: Resolution[] }) {
@@ -471,6 +498,8 @@ function Advanced({ settings, env, engine, update, resolutions }: { settings: Us
   const dev = settings["developer.mode"];
   const reloadStorage = () => api.storage().then(setStorage).catch(() => {});
   useEffect(() => { reloadStorage(); }, []);
+  const [info, setInfo] = useState<AppInfo | null>(null);
+  useEffect(() => { native.appInfo().then(setInfo).catch(() => {}); }, []);
   const ollama = env.providers.find((p) => p.id === "ollama");
   const aiRes = resolutions.find((r) => r.task === "llm");
 
@@ -491,6 +520,13 @@ function Advanced({ settings, env, engine, update, resolutions }: { settings: Us
         </Row>
         <Row label="Developer mode">
           <Switch checked={dev} onChange={(v) => update({ "developer.mode": v })} />
+        </Row>
+      </Card>
+
+      <h3 className="mb-2 mt-6 font-display text-[11.5px] font-bold uppercase tracking-wider text-muted">About</h3>
+      <Card>
+        <Row label="Huddle version" hint={info?.bundlePath ?? ""}>
+          <span className="font-mono text-[12px] text-fg/80">{info ? `${info.version} (build ${info.build})` : "…"}</span>
         </Row>
       </Card>
 

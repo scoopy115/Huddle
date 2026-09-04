@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { Download, Languages, RotateCw, Sparkles, Trash2 } from "lucide-react";
+import { Download, FileAudio, Languages, RotateCw, Sparkles, Trash2 } from "lucide-react";
 import { save } from "@tauri-apps/plugin-dialog";
 import { api, errorMessage } from "@/lib/api";
 import { native } from "@/lib/native";
@@ -20,7 +20,7 @@ export interface MenuMeeting {
 export const SPEAKER_COUNT_OPTIONS = [0, 1, 2, 3, 4, 5, 6, 7, 8];
 export const speakerCountLabel = (n: number) => (n === 0 ? "Detect automatically" : n === 1 ? "1 person" : `${n} people`);
 
-export type MeetingAction = "export-md" | "export-txt" | "export-json" | "export-srt" | "language" | "summary" | "reprocess" | "delete";
+export type MeetingAction = "export-md" | "export-txt" | "export-json" | "export-srt" | "export-audio" | "language" | "summary" | "reprocess" | "delete";
 
 /**
  * Everything the "…" menu on a meeting can do — shared by the detail page and the
@@ -49,6 +49,15 @@ export function useMeetingActions({ onChanged, onDeleted }: { onChanged: (m: Men
         case "export-md": case "export-txt": case "export-json": case "export-srt":
           await exportAs(m, action.slice(7) as "md" | "txt" | "json" | "srt");
           break;
+        case "export-audio": {
+          const detail = await api.getMeeting(m.id);
+          if (!detail.audioPath) throw new Error("This meeting has no audio file any more.");
+          const ext = detail.audioPath.split(".").pop() || "wav";
+          const safe = m.title.replace(/[^\w\s-]/g, "").trim().replace(/\s+/g, "-").slice(0, 60) || "meeting";
+          const path = await save({ defaultPath: `${safe}.${ext}`, filters: [{ name: "Audio", extensions: [ext] }] });
+          if (path) await native.copyFile(detail.audioPath, path);
+          break;
+        }
         case "language":
           setLangChoice(m.languageOverride ?? (m.language ?? "").split(",")[0] ?? "");
           setDialog("language");
@@ -118,6 +127,7 @@ export function MeetingMenuList({ onPick }: { onPick: (a: MeetingAction) => void
           <Download className="h-3.5 w-3.5 text-muted" /> Export {f === "md" ? "Markdown" : f.toUpperCase()}
         </button>
       ))}
+      <button className={ITEM} onClick={() => onPick("export-audio")}><FileAudio className="h-3.5 w-3.5 text-muted" /> Export audio…</button>
       <div className="my-1 border-t border-border" />
       <button className={ITEM} onClick={() => onPick("language")}><Languages className="h-3.5 w-3.5 text-muted" /> Change spoken language…</button>
       <button className={ITEM} onClick={() => onPick("summary")}><Sparkles className="h-3.5 w-3.5 text-muted" /> Regenerate summary</button>

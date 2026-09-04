@@ -1,9 +1,22 @@
-import { Activity, CheckSquare, MessageSquareText, Mic, Search, Settings, type LucideIcon } from "lucide-react";
+import { Activity, ArrowUpCircle, CheckSquare, MessageSquareText, Mic, Search, Settings, type LucideIcon } from "lucide-react";
 import { cn, modKey } from "@/lib/utils";
 import { sounds } from "@/lib/sounds";
+import { showUpdatePrompt, useUpdates } from "@/lib/updates";
 import { useNav, type View } from "@/lib/nav";
 import type { EngineStatus } from "@/lib/native";
 import logo from "@/assets/huddle-logo.svg";
+
+/** Shown once a check has found a newer release and the popup was clicked away. */
+function UpdateAvailable() {
+  const u = useUpdates();
+  if (!u.available || u.prompt) return null;
+  return (
+    <button onClick={() => { sounds.open(); showUpdatePrompt(); }}
+      className="pressable mb-2 flex w-full items-center justify-center gap-2 rounded-full border border-accent/40 bg-accent/10 px-3 py-2 text-[12.5px] font-semibold text-accent hover:bg-accent/15">
+      <ArrowUpCircle className="h-4 w-4 text-accent" /> Update available
+    </button>
+  );
+}
 
 function NavItem({ icon: Icon, label, active, onClick, count, hint }: { icon: LucideIcon; label: string; active: boolean; onClick: () => void; count?: number; hint?: string }) {
   return (
@@ -48,6 +61,7 @@ export function Sidebar({ engine, openActions, recording, running }: { engine: E
       </nav>
       <div data-tauri-drag-region className="flex-1" />
       <div className="relative px-3 pb-3">
+        <UpdateAvailable />
         <button
           onClick={() => go({ kind: "record" })}
           className={cn(

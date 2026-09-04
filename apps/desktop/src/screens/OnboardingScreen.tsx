@@ -5,6 +5,7 @@ import type { DownloadProgress, Resolution, SetupPlan } from "@/types/engine";
 import { fmtBytes, languageName } from "@/lib/format";
 import { languageOptions, systemLanguage } from "@/lib/languages";
 import { native } from "@/lib/native";
+import { PermissionsPanel, micGranted, usePermissions } from "@/components/PermissionsPanel";
 import { Button, Select } from "@/components/ui";
 import logo from "@/assets/huddle-logo.svg";
 
@@ -56,13 +57,18 @@ export function OnboardingScreen({ onDone }: { onDone: () => void }) {
   };
 
   const finish = async () => { await api.updateSettings({ "onboarding.completed": true }); onDone(); };
+  // Step 5 asks macOS for the two recording permissions while the user is watching, so the
+  // prompts never appear later from a menu-bar recording (a background prompt bounces the Dock).
+  const toPermissions = () => setStep(5);
 
   return (
     <div className="flex h-full flex-col">
       <div data-tauri-drag-region className="titlebar-drag h-[38px] shrink-0" />
       <div className="flex flex-1 items-center justify-center px-8 pb-12">
         <div className="w-full max-w-[460px]">
-          {step < 4 ? (
+          {step === 5 ? (
+            <PermissionsStep onDone={finish} />
+          ) : step < 4 ? (
             <>
               <img src={logo} alt="Huddle" className="mb-5 h-9 w-auto select-none" draggable={false} />
               <h1 className="font-display text-[26px] font-bold tracking-tight">Preparing local AI</h1>
@@ -109,12 +115,12 @@ export function OnboardingScreen({ onDone }: { onDone: () => void }) {
 
               <div className="mt-6 flex items-center justify-end gap-2">
                 {needed.length > 0 && !downloading && (
-                  <Button variant="ghost" onClick={finish}>Skip for now</Button>
+                  <Button variant="ghost" onClick={toPermissions}>Skip for now</Button>
                 )}
                 {needed.length > 0 ? (
                   <Button variant="primary" loading={downloading} onClick={startDownloads}><Download className="h-3.5 w-3.5" /> Download {fmtBytes(plan.additionalBytes)}</Button>
                 ) : (
-                  <Button variant="primary" onClick={finish}>Continue</Button>
+                  <Button variant="primary" onClick={toPermissions}>Continue</Button>
                 )}
               </div>
             </>
@@ -122,6 +128,25 @@ export function OnboardingScreen({ onDone }: { onDone: () => void }) {
         </div>
       </div>
     </div>
+  );
+}
+
+function PermissionsStep({ onDone }: { onDone: () => void }) {
+  const perms = usePermissions();
+  const ok = micGranted(perms);
+  // Raise the one-time system-audio prompt here, while the user is watching.
+  useEffect(() => { native.requestSystemAudioPermission().catch(() => {}); }, []);
+  return (
+    <>
+      <img src={logo} alt="Huddle" className="mb-5 h-9 w-auto select-none" draggable={false} />
+      <h1 className="font-display text-[26px] font-bold tracking-tight">Allow recording</h1>
+      <p className="mt-1 text-[13px] text-muted">macOS asks once. Nothing is recorded until you press Record, and audio never leaves this Mac.</p>
+      <div className="mt-5"><PermissionsPanel perms={perms} /></div>
+      <div className="mt-6 flex items-center justify-end gap-2">
+        {!ok && <Button variant="ghost" onClick={onDone}>Later</Button>}
+        <Button variant="primary" onClick={onDone}>{ok ? "Start using Huddle" : "Continue"}</Button>
+      </div>
+    </>
   );
 }
 

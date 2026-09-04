@@ -221,3 +221,6 @@ input[type="number"] {
 .dark select {
   color-scheme: dark;
 }
+
+/* Menu-bar popover: the window is transparent, the panel draws its own shape. */
+html.tray, html.tray body, html.tray #root { background: transparent; overflow: hidden; }

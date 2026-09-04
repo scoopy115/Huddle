@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Huddle",
-  "version": "0.1.0",
+  "version": "0.4.7",
   "identifier": "com.huddle.desktop",
   "build": {
     "frontendDist": "../dist",
@@ -21,6 +21,22 @@
         "fullscreen": false,
         "titleBarStyle": "Overlay",
         "hiddenTitle": true
+      },
+      {
+        "label": "tray",
+        "title": "Huddle",
+        "url": "index.html?window=tray",
+        "width": 300,
+        "height": 444,
+        "resizable": false,
+        "decorations": false,
+        "transparent": true,
+        "shadow": false,
+        "alwaysOnTop": true,
+        "visible": false,
+        "skipTaskbar": true,
+        "focus": false,
+        "acceptFirstMouse": true
       }
     ],
     "security": {
@@ -32,7 +48,8 @@
           "$APPDATA/recordings/**"
         ]
       }
-    }
+    },
+    "macOSPrivateApi": true
   },
   "bundle": {
     "active": true,
@@ -48,7 +65,7 @@
       "icons/icon.ico"
     ],
     "macOS": {
-      "minimumSystemVersion": "12.0"
+      "minimumSystemVersion": "14.2"
     },
     "externalBin": [
       "binaries/huddle-audio-tap"

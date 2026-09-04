@@ -1,15 +1,18 @@
-// huddle-audio-tap — records system audio with ScreenCaptureKit (macOS 13+), no driver.
+// huddle-audio-tap — records system audio through a Core Audio process tap (macOS 14.2+), no
+// driver, no screen recording. The only permission involved is "System Audio Recording Only"
+// (NSAudioCaptureUsageDescription), which macOS asks for the first time a tap is created.
 //
-//   huddle-audio-tap check              → prints "granted" | "denied" (Screen & System Audio Recording permission)
-//   huddle-audio-tap request            → triggers the macOS permission prompt, prints result
+//   huddle-audio-tap request            → creates a tap for a moment so macOS asks for permission (once); prints "unknown"
+//   huddle-audio-tap mic-check          → prints "granted" | "denied" | "undetermined" (Microphone permission)
+//   huddle-audio-tap mic-request        → asks for Microphone permission, prints "granted" | "denied"
 //   huddle-audio-tap record <out.wav>   → writes 16-bit mono 48 kHz WAV until stdin closes or SIGTERM
 //
-// The WAV header is rewritten every second so a crash still leaves a playable file.
-// Audio of the current process is excluded, so Huddle's own playback is never recorded.
+// macOS has no API to read the system-audio permission back (a tap without permission delivers
+// silence rather than an error), so nothing here pretends to know it. The WAV header is rewritten
+// every second so a crash still leaves a playable file.
 import Foundation
-import ScreenCaptureKit
-import CoreMedia
 import AVFoundation
+import CoreAudio
 
 let sampleRate: Double = 48000
 
@@ -45,165 +48,223 @@ final class WavWriter {
     func close() { patch(); try? handle.close() }
 }
 
-final class Output: NSObject, SCStreamOutput, SCStreamDelegate {
-    let writer: WavWriter
-    var lastLevel = Date()
-    init(writer: WavWriter) { self.writer = writer }
-
-    var audioBuffers = 0
-    var screenFrames = 0
-    let debug = ProcessInfo.processInfo.environment["HUDDLE_TAP_DEBUG"] != nil
-
-    func stream(_ stream: SCStream, didOutputSampleBuffer sb: CMSampleBuffer, of type: SCStreamOutputType) {
-        if type != .audio {
-            screenFrames += 1
-            if debug && screenFrames % 25 == 1 { FileHandle.standardError.write("screen frames \(screenFrames), audio buffers \(audioBuffers)\n".data(using: .utf8)!) }
-            return
-        }
-        guard sb.isValid else { return }
-        guard let fmt = sb.formatDescription, let asbd = fmt.audioStreamBasicDescription else { return }
-        audioBuffers += 1
-        if debug && audioBuffers == 1 { FileHandle.standardError.write("first audio buffer: \(asbd.mSampleRate) Hz, \(asbd.mChannelsPerFrame) ch, flags \(asbd.mFormatFlags), \(sb.numSamples) frames\n".data(using: .utf8)!) }
-        let channels = Int(asbd.mChannelsPerFrame)
-        let nonInterleaved = (asbd.mFormatFlags & kAudioFormatFlagIsNonInterleaved) != 0
-        // Non-interleaved audio (what ScreenCaptureKit delivers) needs one AudioBuffer per channel.
-        // A single-entry AudioBufferList makes this call fail with "array too small" and every
-        // buffer would be dropped silently — the WAV then stays at its 44-byte header.
-        let bufferCount = nonInterleaved ? max(1, channels) : 1
-        let buffers = AudioBufferList.allocate(maximumBuffers: bufferCount)
-        defer { free(buffers.unsafeMutablePointer) }
-        var blockBuffer: CMBlockBuffer?
-        let status = CMSampleBufferGetAudioBufferListWithRetainedBlockBuffer(
-            sb, bufferListSizeNeededOut: nil, bufferListOut: buffers.unsafeMutablePointer,
-            bufferListSize: AudioBufferList.sizeInBytes(maximumBuffers: bufferCount),
-            blockBufferAllocator: nil, blockBufferMemoryAllocator: nil, flags: 0, blockBufferOut: &blockBuffer)
-        guard status == noErr else {
-            if debug { FileHandle.standardError.write("audio buffer list failed: \(status)\n".data(using: .utf8)!) }
-            return
-        }
-        let frames = Int(sb.numSamples)
-        var out = [Int16](repeating: 0, count: frames)
-        var peak: Float = 0
-        let isFloat = (asbd.mFormatFlags & kAudioFormatFlagIsFloat) != 0
-        if isFloat {
-            if nonInterleaved {
-                // one buffer per channel
-                for f in 0..<frames {
-                    var acc: Float = 0
-                    for c in 0..<min(channels, buffers.count) {
-                        let p = buffers[c].mData!.assumingMemoryBound(to: Float.self)
-                        acc += p[f]
-                    }
-                    let v = max(-1, min(1, acc / Float(max(1, channels))))
-                    peak = max(peak, abs(v)); out[f] = Int16(v * 32767)
-                }
-            } else {
-                let p = buffers[0].mData!.assumingMemoryBound(to: Float.self)
-                for f in 0..<frames {
-                    var acc: Float = 0
-                    for c in 0..<channels { acc += p[f * channels + c] }
-                    let v = max(-1, min(1, acc / Float(max(1, channels))))
-                    peak = max(peak, abs(v)); out[f] = Int16(v * 32767)
-                }
-            }
-        } else {
-            let p = buffers[0].mData!.assumingMemoryBound(to: Int16.self)
-            for f in 0..<frames {
-                var acc: Int32 = 0
-                for c in 0..<channels { acc += Int32(p[f * channels + c]) }
-                out[f] = Int16(acc / Int32(max(1, channels)))
-            }
-        }
-        writer.append(Data(bytes: out, count: frames * 2))
-        if Date().timeIntervalSince(lastLevel) > 0.2 {
-            lastLevel = Date()
-            print("level \(peak)"); fflush(stdout)
-        }
-    }
-
-    func stream(_ stream: SCStream, didStopWithError error: Error) {
-        FileHandle.standardError.write("stream stopped: \(error.localizedDescription)\n".data(using: .utf8)!)
-        writer.close()
-        exit(3)
-    }
-}
-
 func fail(_ msg: String, code: Int32) -> Never {
     FileHandle.standardError.write((msg + "\n").data(using: .utf8)!)
     exit(code)
 }
 
-let args = CommandLine.arguments
-guard args.count >= 2 else { fail("usage: huddle-audio-tap check|request|record <out.wav>", code: 64) }
+struct TapError: Error, CustomStringConvertible { let description: String; init(_ d: String) { description = d } }
 
-switch args[1] {
-case "check":
-    print(CGPreflightScreenCaptureAccess() ? "granted" : "denied"); exit(0)
-case "request":
-    let ok = CGRequestScreenCaptureAccess()
-    print(ok ? "granted" : "denied"); exit(0)
-case "record":
-    guard args.count >= 3 else { fail("missing output path", code: 64) }
-    let outPath = args[2]
-    guard #available(macOS 13.0, *) else { fail("System audio capture needs macOS 13 or newer.", code: 5) }
-    if !CGPreflightScreenCaptureAccess() {
-        _ = CGRequestScreenCaptureAccess()
-        fail("permission-denied", code: 2)
-    }
-    let writer: WavWriter
-    do { writer = try WavWriter(path: outPath) } catch { fail("cannot open output: \(error)", code: 4) }
-    let output = Output(writer: writer)
-    var streamRef: SCStream?
-    let sem = DispatchSemaphore(value: 0)
-    Task {
-        do {
-            let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
-            guard let display = content.displays.first else { fail("no display", code: 6) }
-            let filter = SCContentFilter(display: display, excludingWindows: [])
-            let cfg = SCStreamConfiguration()
-            cfg.capturesAudio = true
-            cfg.excludesCurrentProcessAudio = true
-            cfg.sampleRate = Int(sampleRate)
-            cfg.channelCount = 2
-            // ScreenCaptureKit only delivers audio while a live video pipeline exists: a 2×2 frame
-            // at 1 fps with no screen output starts fine but never produces a single audio buffer
-            // (macOS 26.6). A small, low-rate video stream whose frames we throw away costs ~nothing.
-            let env = ProcessInfo.processInfo.environment
-            cfg.width = Int(env["HUDDLE_TAP_W"] ?? "") ?? 64
-            cfg.height = Int(env["HUDDLE_TAP_H"] ?? "") ?? 36
-            cfg.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(Int(env["HUDDLE_TAP_FPS"] ?? "") ?? 5))
-            cfg.queueDepth = 3
-            cfg.showsCursor = false
-            if env["HUDDLE_TAP_DEBUG"] != nil {
-                FileHandle.standardError.write("display \(display.displayID) \(display.width)x\(display.height); config \(cfg.width)x\(cfg.height), excludesCurrentProcessAudio=\(cfg.excludesCurrentProcessAudio)\n".data(using: .utf8)!)
-            }
-            let stream = SCStream(filter: filter, configuration: cfg, delegate: output)
-            try stream.addStreamOutput(output, type: .screen, sampleHandlerQueue: DispatchQueue(label: "huddle.video"))
-            try stream.addStreamOutput(output, type: .audio, sampleHandlerQueue: DispatchQueue(label: "huddle.audio"))
-            try await stream.startCapture()
-            streamRef = stream
-            print("READY"); fflush(stdout)
-        } catch {
-            fail("start failed: \(error.localizedDescription)", code: 3)
+// MARK: - Core Audio process tap
+
+@available(macOS 14.2, *)
+final class TapRecorder {
+    var tapID = AudioObjectID(kAudioObjectUnknown)
+    var aggID = AudioObjectID(kAudioObjectUnknown)
+    var procID: AudioDeviceIOProcID?
+    var writer: WavWriter?
+    var format = AudioStreamBasicDescription()
+    var lastLevel = Date()
+    /// The rate the aggregate device actually runs at. It follows the tapped output device, and
+    /// the built-in speakers share a clock with the built-in microphone — so it changes when the
+    /// microphone capture starts (48 → 24 kHz on a MacBook). The output stays 48 kHz; frames are
+    /// resampled whenever the two differ.
+    var deviceRate: Double = 48000
+    var callbacks = 0
+    var prev: Float = 0
+    var phase: Double = 0
+    let debug = ProcessInfo.processInfo.environment["HUDDLE_TAP_DEBUG"] != nil
+
+    func start(outPath: String?) throws {
+        let desc = CATapDescription(monoGlobalTapButExcludeProcesses: [])
+        desc.name = "Huddle system audio"
+        desc.isPrivate = true
+        desc.muteBehavior = .unmuted
+        var err = AudioHardwareCreateProcessTap(desc, &tapID)
+        guard err == noErr else { throw TapError("could not create the system audio tap (\(err))") }
+
+        var fmtAddr = AudioObjectPropertyAddress(mSelector: kAudioTapPropertyFormat, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+        var fmtSize = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
+        err = AudioObjectGetPropertyData(tapID, &fmtAddr, 0, nil, &fmtSize, &format)
+        guard err == noErr else { throw TapError("could not read the tap format (\(err))") }
+        guard format.mFormatID == kAudioFormatLinearPCM, format.mFormatFlags & kAudioFormatFlagIsFloat != 0, format.mBitsPerChannel == 32 else {
+            throw TapError("unexpected tap format \(format.mFormatID)/\(format.mFormatFlags)/\(format.mBitsPerChannel)")
         }
-        sem.signal()
+        deviceRate = format.mSampleRate
+
+        let outUID = try defaultOutputUID()
+        let aggDesc: [String: Any] = [
+            kAudioAggregateDeviceNameKey as String: "Huddle System Audio",
+            kAudioAggregateDeviceUIDKey as String: "com.huddle.desktop.tap." + UUID().uuidString,
+            kAudioAggregateDeviceMainSubDeviceKey as String: outUID,
+            kAudioAggregateDeviceIsPrivateKey as String: true,
+            kAudioAggregateDeviceIsStackedKey as String: false,
+            kAudioAggregateDeviceTapAutoStartKey as String: true,
+            kAudioAggregateDeviceSubDeviceListKey as String: [[kAudioSubDeviceUIDKey as String: outUID]],
+            kAudioAggregateDeviceTapListKey as String: [[kAudioSubTapDriftCompensationKey as String: true, kAudioSubTapUIDKey as String: desc.uuid.uuidString]],
+        ]
+        err = AudioHardwareCreateAggregateDevice(aggDesc as CFDictionary, &aggID)
+        guard err == noErr else { throw TapError("could not create the capture device (\(err))") }
+
+        if let outPath { writer = try WavWriter(path: outPath) }
+        err = AudioDeviceCreateIOProcIDWithBlock(&procID, aggID, nil) { [unowned self] _, inData, _, _, _ in
+            self.handle(inData)
+        }
+        guard err == noErr, procID != nil else { throw TapError("could not attach to the capture device (\(err))") }
+        err = AudioDeviceStart(aggID, procID)
+        guard err == noErr else { throw TapError("could not start the capture device (\(err))") }
+        readDeviceRate()
+        var rateAddr = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyNominalSampleRate, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+        AudioObjectAddPropertyListenerBlock(aggID, &rateAddr, DispatchQueue.global()) { [weak self] _, _ in self?.readDeviceRate() }
+        if debug { FileHandle.standardError.write("tap format \(format.mSampleRate) Hz \(format.mChannelsPerFrame) ch flags \(format.mFormatFlags); device rate \(deviceRate) Hz\n".data(using: .utf8)!) }
     }
-    sem.wait()
-    // Run until stdin closes (parent dropped the pipe) or SIGTERM.
-    let stopAndExit: () -> Void = {
-        let done = DispatchSemaphore(value: 0)
-        Task { try? await streamRef?.stopCapture(); done.signal() }
-        _ = done.wait(timeout: .now() + 3)
-        writer.close()
-        exit(0)
+
+    func stop() {
+        if let procID { AudioDeviceStop(aggID, procID); AudioDeviceDestroyIOProcID(aggID, procID) }
+        if aggID != kAudioObjectUnknown { AudioHardwareDestroyAggregateDevice(aggID) }
+        if tapID != kAudioObjectUnknown { AudioHardwareDestroyProcessTap(tapID) }
+        writer?.close()
     }
+
+    /// The aggregate's nominal rate is what the callbacks are clocked by.
+    func readDeviceRate() {
+        var addr = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyNominalSampleRate, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+        var rate: Float64 = 0
+        var size = UInt32(MemoryLayout<Float64>.size)
+        if AudioObjectGetPropertyData(aggID, &addr, 0, nil, &size, &rate) == noErr, rate > 1000, rate != deviceRate {
+            if debug { FileHandle.standardError.write("device rate \(deviceRate) → \(rate) Hz\n".data(using: .utf8)!) }
+            deviceRate = rate
+        }
+    }
+
+    private func defaultOutputUID() throws -> String {
+        var devID = AudioObjectID(kAudioObjectUnknown)
+        var addr = AudioObjectPropertyAddress(mSelector: kAudioHardwarePropertyDefaultOutputDevice, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+        var size = UInt32(MemoryLayout<AudioObjectID>.size)
+        var err = AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &addr, 0, nil, &size, &devID)
+        guard err == noErr, devID != kAudioObjectUnknown else { throw TapError("no default output device (\(err))") }
+        var uidAddr = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyDeviceUID, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+        var uid: Unmanaged<CFString>? = nil
+        var uidSize = UInt32(MemoryLayout<Unmanaged<CFString>?>.size)
+        err = AudioObjectGetPropertyData(devID, &uidAddr, 0, nil, &uidSize, &uid)
+        guard err == noErr, let s = uid?.takeUnretainedValue() else { throw TapError("no output device id (\(err))") }
+        return s as String
+    }
+
+    /// Mix the tap's float buffers down to 16-bit mono at 48 kHz and report the peak level.
+    private func handle(_ list: UnsafePointer<AudioBufferList>) {
+        let abl = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: list))
+        guard abl.count > 0, let first = abl[0].mData else { return }
+        let channels = Int(max(1, format.mChannelsPerFrame))
+        let nonInterleaved = format.mFormatFlags & kAudioFormatFlagIsNonInterleaved != 0
+        let frames = nonInterleaved ? Int(abl[0].mDataByteSize) / 4 : Int(abl[0].mDataByteSize) / (4 * channels)
+        guard frames > 0 else { return }
+        var mono = [Float](repeating: 0, count: frames)
+        var peak: Float = 0
+        if nonInterleaved {
+            let ptrs = (0..<min(channels, abl.count)).compactMap { abl[$0].mData?.assumingMemoryBound(to: Float.self) }
+            for f in 0..<frames {
+                var acc: Float = 0
+                for p in ptrs { acc += p[f] }
+                let v = max(-1, min(1, acc / Float(max(1, ptrs.count))))
+                peak = max(peak, abs(v)); mono[f] = v
+            }
+        } else {
+            let p = first.assumingMemoryBound(to: Float.self)
+            for f in 0..<frames {
+                var acc: Float = 0
+                for c in 0..<channels { acc += p[f * channels + c] }
+                let v = max(-1, min(1, acc / Float(channels)))
+                peak = max(peak, abs(v)); mono[f] = v
+            }
+        }
+        callbacks += 1
+        if callbacks % 100 == 0 { readDeviceRate() }  // belt and braces next to the listener
+        if writer != nil {
+            let out: [Int16]
+            let ratio = deviceRate / sampleRate
+            if abs(ratio - 1) < 1e-9 {
+                out = mono.map { Int16($0 * 32767) }
+            } else {
+                // Linear interpolation from the device rate to 48 kHz; `prev`/`phase` carry the
+                // position across callbacks so the stream stays continuous.
+                let x = [prev] + mono
+                var o = [Int16](); o.reserveCapacity(Int(Double(frames) / ratio) + 2)
+                var p = phase
+                while p < Double(frames) {
+                    let i = Int(p); let f = Float(p - Double(i))
+                    let v = x[i] + (x[i + 1] - x[i]) * f
+                    o.append(Int16(max(-1, min(1, v)) * 32767))
+                    p += ratio
+                }
+                phase = p - Double(frames)
+                out = o
+            }
+            writer?.append(Data(bytes: out, count: out.count * 2))
+        }
+        prev = mono[frames - 1]
+        // Level lines are for the recorder's meter; the probe's stdout must stay a single word.
+        if writer != nil, Date().timeIntervalSince(lastLevel) > 0.2 {
+            lastLevel = Date()
+            print("level \(peak)"); fflush(stdout)
+        }
+    }
+}
+
+/// Creating a tap is what makes macOS show the "System Audio Recording Only" prompt; it appears
+/// only while the permission is undetermined, so this is safe to call on every launch.
+@available(macOS 14.2, *)
+func requestPermission() -> Never {
+    let rec = TapRecorder()
+    if (try? rec.start(outPath: nil)) != nil {
+        usleep(200_000)
+        rec.stop()
+    }
+    print("unknown"); exit(0)
+}
+
+@available(macOS 14.2, *)
+func runRecording(outPath: String) -> Never {
+    let rec = TapRecorder()
+    do { try rec.start(outPath: outPath) } catch { fail("start failed: \(error)", code: 3) }
+    print("READY"); fflush(stdout)
     signal(SIGTERM) { _ in exit(0) }
     signal(SIGINT) { _ in exit(0) }
     DispatchQueue.global().async {
+        // Run until stdin closes (parent dropped the pipe) or "stop" arrives.
         while let line = readLine() { if line == "stop" { break } }
-        stopAndExit()
+        rec.stop()
+        exit(0)
     }
     RunLoop.main.run()
+    exit(0)
+}
+
+// MARK: - Commands
+
+let args = CommandLine.arguments
+guard args.count >= 2 else { fail("usage: huddle-audio-tap request|mic-check|mic-request|record <out.wav>", code: 64) }
+guard #available(macOS 14.2, *) else { fail("System audio capture needs macOS 14.2 or newer.", code: 5) }
+
+switch args[1] {
+case "request":
+    requestPermission()
+case "mic-check":
+    switch AVCaptureDevice.authorizationStatus(for: .audio) {
+    case .authorized: print("granted")
+    case .notDetermined: print("undetermined")
+    default: print("denied")
+    }
+    exit(0)
+case "mic-request":
+    let sem = DispatchSemaphore(value: 0)
+    var ok = false
+    AVCaptureDevice.requestAccess(for: .audio) { granted in ok = granted; sem.signal() }
+    _ = sem.wait(timeout: .now() + 120)
+    print(ok ? "granted" : "denied"); exit(0)
+case "record":
+    guard args.count >= 3 else { fail("missing output path", code: 64) }
+    runRecording(outPath: args[2])
 default:
     fail("unknown command", code: 64)
 }

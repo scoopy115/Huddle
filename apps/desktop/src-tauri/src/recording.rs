@@ -23,7 +23,7 @@ use std::time::{Duration, Instant};
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, State, Manager};
 
 use crate::paths;
 use crate::system_audio::SystemTap;
@@ -94,6 +94,8 @@ unsafe impl Send for Active {}
 #[derive(Default)]
 pub struct RecorderState {
     active: Mutex<Option<Active>>,
+    /// Recordings stopped from the tray or the global shortcut, waiting for the UI to submit them.
+    pending: Mutex<Vec<RecordingMeta>>,
 }
 
 fn wav_header(sample_rate: u32, channels: u16, data_len: u32) -> [u8; 44] {
@@ -308,27 +310,47 @@ fn finish_capture(mut c: Capture) -> Result<u64, String> {
 #[tauri::command]
 pub fn start_recording(
     app: AppHandle,
-    state: State<'_, RecorderState>,
     device_name: Option<String>,
     system_audio: Option<bool>,
     system_device_name: Option<String>,
 ) -> Result<RecordingMeta, String> {
+    let _ = system_device_name; // kept for API compatibility; ScreenCaptureKit needs no device
+    start(&app, device_name, system_audio.unwrap_or(false))
+}
+
+pub fn is_recording(app: &AppHandle) -> bool {
+    app.state::<RecorderState>().active.lock().map(|g| g.is_some()).unwrap_or(false)
+}
+
+pub fn push_pending(app: &AppHandle, meta: RecordingMeta) {
+    if let Ok(mut q) = app.state::<RecorderState>().pending.lock() {
+        q.push(meta);
+    }
+}
+
+/// Recordings finished from the menu bar / shortcut that the UI has not yet turned into meetings.
+#[tauri::command]
+pub fn take_pending_recordings(state: State<'_, RecorderState>) -> Vec<RecordingMeta> {
+    state.pending.lock().map(|mut q| std::mem::take(&mut *q)).unwrap_or_default()
+}
+
+/// Start capturing with `device_name` (None = system default) and optionally the system audio.
+pub fn start(app: &AppHandle, device_name: Option<String>, want_system: bool) -> Result<RecordingMeta, String> {
+    let state = app.state::<RecorderState>();
     let mut guard = state.active.lock().map_err(|_| "recorder lock poisoned")?;
     if guard.is_some() {
         return Err("A recording is already in progress.".into());
     }
 
-    let _ = system_device_name; // kept for API compatibility; ScreenCaptureKit needs no device
     let device = find_device(device_name.as_deref())?;
     let dev_name = device.name().unwrap_or_else(|_| "Microphone".into());
-    let want_system = system_audio.unwrap_or(false);
     let sample_rate = device
         .default_input_config()
         .map_err(|e| format!("Could not read microphone configuration: {e}"))?
         .sample_rate()
         .0;
 
-    let data_dir = paths::data_dir(&app).map_err(|e| e.to_string())?;
+    let data_dir = paths::data_dir(app).map_err(|e| e.to_string())?;
     let id = format!(
         "{}-{}",
         chrono::Local::now().format("%Y%m%d-%H%M%S"),
@@ -384,11 +406,18 @@ pub fn start_recording(
 
     log::info!("recording started: {} ({} Hz{})", id, sample_rate, if system.is_some() { ", + system audio" } else { "" });
     *guard = Some(Active { meta: meta.clone(), started, mic, system, stream_error, stopped });
+    drop(guard);
+    crate::tray::refresh(app, true);
     Ok(meta)
 }
 
 #[tauri::command]
-pub fn stop_recording(app: AppHandle, state: State<'_, RecorderState>) -> Result<RecordingMeta, String> {
+pub fn stop_recording(app: AppHandle) -> Result<RecordingMeta, String> {
+    stop(&app)
+}
+
+pub fn stop(app: &AppHandle) -> Result<RecordingMeta, String> {
+    let state = app.state::<RecorderState>();
     let mut guard = state.active.lock().map_err(|_| "recorder lock poisoned")?;
     let active = guard.take().ok_or("No recording in progress.")?;
     let elapsed = active.started.elapsed().as_secs_f64();
@@ -398,7 +427,7 @@ pub fn stop_recording(app: AppHandle, state: State<'_, RecorderState>) -> Result
     let mic_result = finish_capture(active.mic);
     let sys_result = active.system.map(|t| t.stop().map(|_| 0u64));
 
-    let data_dir = paths::data_dir(&app).map_err(|e| e.to_string())?;
+    let data_dir = paths::data_dir(app).map_err(|e| e.to_string())?;
     let dir = data_dir.join("recordings").join(&active.meta.id);
     let mut meta = active.meta.clone();
     meta.ended_at = Some(chrono::Utc::now().to_rfc3339());
@@ -427,6 +456,8 @@ pub fn stop_recording(app: AppHandle, state: State<'_, RecorderState>) -> Result
     }
     write_meta(&dir, &meta).map_err(|e| e.to_string())?;
     log::info!("recording stopped: {} ({:.1}s, {})", meta.id, meta.duration_sec, meta.status);
+    drop(guard);
+    crate::tray::refresh(app, false);
     Ok(meta)
 }
 
@@ -444,6 +475,37 @@ pub fn recording_status(state: State<'_, RecorderState>) -> Result<RecordingStat
 }
 
 /// Recordings whose `recording.json` still says `recording` — the app died mid-meeting.
+/// Quitting while recording: finish the file properly and leave it for the next launch to offer
+/// as a recoverable recording (the in-memory pending queue does not survive the process).
+pub fn stop_for_exit(app: &AppHandle) {
+    if let Ok(mut meta) = stop(app) {
+        if meta.status == "saved" {
+            meta.status = "unsubmitted".into();
+            if let Ok(data_dir) = paths::data_dir(app) {
+                let _ = write_meta(&data_dir.join("recordings").join(&meta.id), &meta);
+            }
+        }
+    }
+}
+
+/// Delete unfinished recordings the user chose not to recover, so the prompt does not return.
+#[tauri::command]
+pub fn discard_unfinished_recordings(app: AppHandle, ids: Vec<String>) -> Result<(), String> {
+    let rec_dir = paths::data_dir(&app).map_err(|e| e.to_string())?.join("recordings");
+    for id in ids {
+        if id.is_empty() || id.contains(['/', '\\']) || id.starts_with('.') {
+            continue;
+        }
+        let dir = rec_dir.join(&id);
+        let Ok(raw) = std::fs::read(dir.join("recording.json")) else { continue };
+        let Ok(meta) = serde_json::from_slice::<RecordingMeta>(&raw) else { continue };
+        if meta.status == "recording" || meta.status == "unsubmitted" {
+            std::fs::remove_dir_all(&dir).map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub fn list_unfinished_recordings(app: AppHandle) -> Result<Vec<RecordingMeta>, String> {
     let data_dir = paths::data_dir(&app).map_err(|e| e.to_string())?;
@@ -454,7 +516,7 @@ pub fn list_unfinished_recordings(app: AppHandle) -> Result<Vec<RecordingMeta>, 
         let meta_path = e.path().join("recording.json");
         let Ok(raw) = std::fs::read(&meta_path) else { continue };
         let Ok(mut meta) = serde_json::from_slice::<RecordingMeta>(&raw) else { continue };
-        if meta.status == "recording" {
+        if meta.status == "recording" || meta.status == "unsubmitted" {
             if let Ok(md) = std::fs::metadata(&meta.file_path) {
                 let bytes_per_sec = (meta.sample_rate as u64) * (meta.channels as u64) * 2;
                 if bytes_per_sec > 0 && md.len() > 44 {

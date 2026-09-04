@@ -73,6 +73,14 @@ export interface LevelEvent {
   systemRms?: number | null;
 }
 
+/** Preferences the shell keeps for itself (menu-bar mode, tray-recording defaults). */
+export interface ShellPrefs {
+  menuBar: boolean;
+  inputDevice: string | null;
+  systemAudio: boolean;
+  sounds: boolean;
+}
+
 /** The shell's LAN forwarder for the network MCP server. */
 export interface ProxyStatus {
   running: boolean;
@@ -151,6 +159,29 @@ const browser = {
   networkProxyStop: async (): Promise<ProxyStatus> => ({ running: false, port: null, targetPort: null, error: null }),
   networkProxyStatus: async (): Promise<ProxyStatus> => ({ running: false, port: null, targetPort: null, error: null }),
   openFirewallSettings: async (): Promise<void> => {},
+  getShellPrefs: async (): Promise<ShellPrefs> => ({ menuBar: false, inputDevice: null, systemAudio: false, sounds: true }),
+  microphonePermission: async (): Promise<MicPermission> => "unknown",
+  requestMicrophonePermission: async (): Promise<MicPermission> => "unknown",
+  openMicrophoneSettings: async (): Promise<void> => {},
+  onShellPrefsChanged: async (_cb: (p: ShellPrefs) => void): Promise<UnlistenFn> => () => {},
+  setShellPrefs: async (patch: Partial<ShellPrefs>): Promise<ShellPrefs> => ({ menuBar: false, inputDevice: null, systemAudio: false, sounds: true, ...patch } as ShellPrefs),
+  takePendingRecordings: async (): Promise<RecordingMeta[]> => [],
+  discardUnfinishedRecordings: async (_ids: string[]): Promise<void> => {},
+  appInfo: async (): Promise<AppInfo> => ({ version: "dev", build: "browser", bundlePath: null }),
+  checkForUpdates: async (): Promise<UpdateCheck> => ({ currentVersion: "dev", update: null }),
+  installUpdate: async (_assetUrl: string): Promise<InstallOutcome> => { throw new Error("Only available in the desktop app."); },
+  onUpdateProgress: async (_cb: (p: UpdateProgress) => void): Promise<UnlistenFn> => () => {},
+  copyFile: async (_src: string, _dst: string): Promise<number> => { throw new Error("Only available in the desktop app."); },
+  onRecordingStarted: async (_cb: (m: RecordingMeta) => void): Promise<UnlistenFn> => () => {},
+  onRecordingError: async (_cb: (message: string) => void): Promise<UnlistenFn> => () => {},
+  onRecordingWarning: async (_cb: (message: string) => void): Promise<UnlistenFn> => () => {},
+  onTrayShown: async (_cb: () => void): Promise<UnlistenFn> => () => {},
+  trayToggleRecording: async (): Promise<void> => { throw new Error("Only available in the desktop app."); },
+  trayOpenMain: async (): Promise<void> => {},
+  trayHide: async (): Promise<void> => {},
+  trayQuit: async (): Promise<void> => {},
+  setTrayBusy: async (_busy: boolean): Promise<void> => {},
+  onRecordingStopped: async (_cb: (m: RecordingMeta) => void): Promise<UnlistenFn> => () => {},
 };
 
 const desktop = {
@@ -170,6 +201,29 @@ const desktop = {
   networkProxyStop: () => invoke<ProxyStatus>("network_proxy_stop"),
   networkProxyStatus: () => invoke<ProxyStatus>("network_proxy_status"),
   openFirewallSettings: () => invoke<void>("open_firewall_settings"),
+  getShellPrefs: () => invoke<ShellPrefs>("get_shell_prefs"),
+  microphonePermission: () => invoke<MicPermission>("microphone_permission"),
+  requestMicrophonePermission: () => invoke<MicPermission>("request_microphone_permission"),
+  openMicrophoneSettings: () => invoke<void>("open_microphone_settings"),
+  setShellPrefs: (patch: Partial<ShellPrefs>) => invoke<ShellPrefs>("set_shell_prefs", { patch }),
+  onShellPrefsChanged: (cb: (p: ShellPrefs) => void): Promise<UnlistenFn> => listen<ShellPrefs>("shell-prefs:changed", (ev) => cb(ev.payload)),
+  takePendingRecordings: () => invoke<RecordingMeta[]>("take_pending_recordings"),
+  discardUnfinishedRecordings: (ids: string[]) => invoke<void>("discard_unfinished_recordings", { ids }),
+  copyFile: (src: string, dst: string) => invoke<number>("copy_file", { src, dst }),
+  appInfo: () => invoke<AppInfo>("app_info"),
+  checkForUpdates: () => invoke<UpdateCheck>("check_for_updates"),
+  installUpdate: (assetUrl: string) => invoke<InstallOutcome>("install_update", { assetUrl }),
+  onUpdateProgress: (cb: (p: UpdateProgress) => void): Promise<UnlistenFn> => listen<UpdateProgress>("update:progress", (ev) => cb(ev.payload)),
+  onRecordingStarted: (cb: (m: RecordingMeta) => void): Promise<UnlistenFn> => listen<RecordingMeta>("recording:started", (ev) => cb(ev.payload)),
+  onRecordingStopped: (cb: (m: RecordingMeta) => void): Promise<UnlistenFn> => listen<RecordingMeta>("recording:stopped", (ev) => cb(ev.payload)),
+  onRecordingError: (cb: (message: string) => void): Promise<UnlistenFn> => listen<string>("recording:error", (ev) => cb(ev.payload)),
+  onRecordingWarning: (cb: (message: string) => void): Promise<UnlistenFn> => listen<string>("recording:warning", (ev) => cb(ev.payload)),
+  onTrayShown: (cb: () => void): Promise<UnlistenFn> => listen<void>("tray:shown", () => cb()),
+  trayToggleRecording: () => invoke<void>("tray_toggle_recording"),
+  trayOpenMain: () => invoke<void>("tray_open_main"),
+  trayHide: () => invoke<void>("tray_hide"),
+  trayQuit: () => invoke<void>("tray_quit"),
+  setTrayBusy: (busy: boolean) => invoke<void>("tray_set_busy", { busy }),
   engineFetch: <T>(method: string, path: string, body?: unknown) =>
     invoke<T>("engine_fetch", { method, path, body: body ?? null }),
   onLevel: (cb: (e: LevelEvent) => void): Promise<UnlistenFn> =>
@@ -184,5 +238,12 @@ const desktop = {
   openSystemAudioSettings: () => invoke<void>("open_system_audio_settings"),
   getLocalePrefs: () => invoke<LocalePrefs>("get_locale_prefs"),
 };
+
+export type MicPermission = "granted" | "denied" | "undetermined" | "unknown";
+export interface AppInfo { version: string; build: string; bundlePath: string | null }
+export interface UpdateInfo { version: string; notes: string; pageUrl: string; assetUrl: string | null; assetName: string | null; assetSize: number | null }
+export interface UpdateCheck { currentVersion: string; update: UpdateInfo | null }
+export interface UpdateProgress { phase: string; downloaded: number; total: number | null }
+export interface InstallOutcome { installed: boolean; appPath: string; reason: string | null }
 
 export const native: typeof desktop = isTauri() ? desktop : (browser as typeof desktop);

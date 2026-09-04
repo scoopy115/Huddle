@@ -1,6 +1,6 @@
 [package]
 name = "huddle"
-version = "0.1.0"
+version = "0.4.7"
 description = "Huddle — private, local-first meeting recorder and knowledge base"
 authors = ["Huddle contributors"]
 license = "MIT"
@@ -15,10 +15,11 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["protocol-asset"] }
+tauri = { version = "2", features = ["protocol-asset", "tray-icon", "image-png", "macos-private-api"] }
 tauri-plugin-log = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-opener = "2"
+tauri-plugin-global-shortcut = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 log = "0.4"
@@ -31,6 +32,13 @@ uuid = { version = "1", features = ["v4"] }
 chrono = { version = "0.4", features = ["serde"] }
 rand = "0.8"
 sysinfo = "0.33"
+semver = "1"
+tauri-plugin-positioner = { version = "2", features = ["tray-icon"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", features = ["NSApplication", "NSWindow", "NSAppearance", "NSResponder", "NSRunningApplication"] }
+objc2-foundation = { version = "0.3", features = ["NSArray", "NSString"] }
 
 [profile.release]
 codegen-units = 1

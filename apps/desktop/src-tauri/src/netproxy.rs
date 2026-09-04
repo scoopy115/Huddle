@@ -51,13 +51,10 @@ fn stop_inner(state: &ProxyState) {
 /// Start (or re-point) the forwarder: public `port` on all interfaces → `127.0.0.1:target_port`.
 #[tauri::command]
 pub async fn network_proxy_start(state: tauri::State<'_, ProxyState>, port: u16, target_port: u16) -> Result<ProxyStatus, String> {
-    {
-        let g = state.inner.lock().unwrap();
-        if let Some(r) = g.as_ref() {
-            if r.port == port && r.target_port == target_port {
-                return Ok(status_of(&state));
-            }
-        }
+    // Decide with the guard dropped: `status_of` takes the same (non-reentrant) lock.
+    let already = matches!(state.inner.lock().unwrap().as_ref(), Some(r) if r.port == port && r.target_port == target_port);
+    if already {
+        return Ok(status_of(&state));
     }
     stop_inner(&state);
     // Binding here (not inside the spawned task) makes the firewall prompt and any
@@ -93,16 +90,17 @@ pub async fn network_proxy_start(state: tauri::State<'_, ProxyState>, port: u16,
     Ok(status_of(&state))
 }
 
+/// Async so a lock is never awaited on the main thread.
 #[tauri::command]
-pub fn network_proxy_stop(state: tauri::State<'_, ProxyState>) -> ProxyStatus {
+pub async fn network_proxy_stop(state: tauri::State<'_, ProxyState>) -> Result<ProxyStatus, String> {
     stop_inner(&state);
     *state.last_error.lock().unwrap() = None;
-    status_of(&state)
+    Ok(status_of(&state))
 }
 
 #[tauri::command]
-pub fn network_proxy_status(state: tauri::State<'_, ProxyState>) -> ProxyStatus {
-    status_of(&state)
+pub async fn network_proxy_status(state: tauri::State<'_, ProxyState>) -> Result<ProxyStatus, String> {
+    Ok(status_of(&state))
 }
 
 /// System Settings → Network → Firewall, where the user can allow Huddle if they dismissed the prompt.
