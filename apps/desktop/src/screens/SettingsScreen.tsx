@@ -269,7 +269,7 @@ const sourceOf = (m: LocalModel) => m.source === "ollama" ? (m.meta.pulledByHudd
   : m.source === "our_app" ? "Installed by Huddle" : m.source === "huggingface" ? "Found in Hugging Face cache" : sourceLabel(m.source);
 
 /** One installed model with its radio button; defined at module level so React keeps its state. */
-function ModelRow({ m, selectedKey, settings, update, onRemove }: { m: LocalModel; selectedKey: "models.whisper" | "models.ai"; settings: UserSettings; update: Update; onRemove: (m: LocalModel) => void }) {
+function ModelRow({ m, selectedKey, settings, update, onRemove, inUse }: { m: LocalModel; selectedKey: "models.whisper" | "models.ai"; settings: UserSettings; update: Update; onRemove: (m: LocalModel) => void; inUse: boolean }) {
   return (
     <div className="flex items-center gap-3 border-b border-border px-4 py-3 last:border-b-0">
       <input type="radio" name={selectedKey} checked={settings[selectedKey] === m.id} onChange={() => update({ [selectedKey]: m.id } as Partial<UserSettings>)} className="accent-[rgb(var(--accent))]" />
@@ -277,7 +277,7 @@ function ModelRow({ m, selectedKey, settings, update, onRemove }: { m: LocalMode
         <div className="flex items-center gap-2 text-[13px] font-medium">
           {modelTitle(m)}
           {m.meta.recommended && <Badge tone="accent"><Star className="h-3 w-3" /> Recommended</Badge>}
-          {m.inUse && <Badge tone="good"><Check className="h-3 w-3" /> In use</Badge>}
+          {inUse && <Badge tone="good"><Check className="h-3 w-3" /> In use</Badge>}
         </div>
         <div className="flex flex-wrap items-center gap-x-3 text-[12px] text-muted">
           <span className="inline-flex items-center gap-1"><Download className="h-3 w-3" />{sourceOf(m)}</span>
@@ -316,9 +316,13 @@ function Models({ settings, env, resolutions, update, reload }: { settings: User
   const whisper = env.models.filter((m) => m.task === "transcription" && m.compatible);
   const ai = env.models.filter((m) => m.task === "llm" && m.source === "ollama" && m.compatible && m.meta.generalChat !== false);
   const aiSorted = useMemo(() => [...ai].sort((a, b) => Number(!!b.meta.recommended) - Number(!!a.meta.recommended) || a.name.localeCompare(b.name)), [ai]);
-  const whisperAutoModel = resolutions.find((r) => r.task === "transcription")?.model;
+  // "In use" is what the resolver returns right now (it follows a manual pick immediately);
+  // "Automatic (…)" names what Automatic would take, whatever is selected.
+  const whisperRes = resolutions.find((r) => r.task === "transcription");
+  const whisperAutoModel = whisperRes?.autoModel ?? whisperRes?.model;
   const whisperAuto = whisperAutoModel ? modelTitle(whisperAutoModel) : undefined;
   const aiRes = resolutions.find((r) => r.task === "llm");
+  const inUseIds = new Set(resolutions.map((r) => r.model?.id).filter(Boolean));
   const ollama = env.providers.find((p) => p.id === "ollama");
   // "Installed" means the model is actually usable: it appears in the inventory as a Huddle-managed
   // model. A snapshot folder alone is not enough — it exists from the first byte of a download.
@@ -376,7 +380,7 @@ function Models({ settings, env, resolutions, update, reload }: { settings: User
               <input type="radio" name="models.whisper" checked={!settings["models.whisper"]} onChange={() => update({ "models.whisper": null })} className="accent-[rgb(var(--accent))]" />
               <div className="text-[13px]">{autoLabel(whisperAuto)}</div>
             </div>
-            {whisper.map((m) => <ModelRow key={m.id} m={m} selectedKey="models.whisper" settings={settings} update={update} onRemove={setConfirm} />)}
+            {whisper.map((m) => <ModelRow key={m.id} m={m} selectedKey="models.whisper" settings={settings} update={update} onRemove={setConfirm} inUse={inUseIds.has(m.id)} />)}
             {whisper.length === 0 && <div className="px-4 py-3 text-[12.5px] text-muted">No Whisper model installed yet.</div>}
           </Card>
           <h3 className="mb-2 mt-6 font-display text-[11.5px] font-bold uppercase tracking-wider text-muted">Model marketplace</h3>
@@ -396,9 +400,9 @@ function Models({ settings, env, resolutions, update, reload }: { settings: User
           <Card>
             <div className="flex items-center gap-3 border-b border-border px-4 py-3">
               <input type="radio" name="models.ai" checked={!settings["models.ai"]} onChange={() => update({ "models.ai": null })} className="accent-[rgb(var(--accent))]" />
-              <div className="flex items-center gap-1.5 text-[13px]">{autoLabel(aiRes?.model?.name)} <InfoTip text="A model of about 6–9 billion parameters is all Huddle needs. Bigger models are slower without better notes." /></div>
+              <div className="flex items-center gap-1.5 text-[13px]">{autoLabel((aiRes?.autoModel ?? aiRes?.model)?.name)} <InfoTip text="A model of 4 to 9 billion parameters is all Huddle needs. Bigger models are slower without better notes." /></div>
             </div>
-            {aiSorted.map((m) => <ModelRow key={m.id} m={m} selectedKey="models.ai" settings={settings} update={update} onRemove={setConfirm} />)}
+            {aiSorted.map((m) => <ModelRow key={m.id} m={m} selectedKey="models.ai" settings={settings} update={update} onRemove={setConfirm} inUse={inUseIds.has(m.id)} />)}
             {aiSorted.length === 0 && <div className="px-4 py-3 text-[12.5px] text-muted">No suitable AI model installed yet.</div>}
           </Card>
           <h3 className="mb-2 mt-6 font-display text-[11.5px] font-bold uppercase tracking-wider text-muted">Model marketplace</h3>

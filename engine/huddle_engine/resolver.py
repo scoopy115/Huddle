@@ -147,15 +147,22 @@ def candidates_for(ctx: ResolverContext) -> list[DownloadCandidate]:
 
 
 def resolve_transcription(ctx: ResolverContext) -> Resolution:
-    models = [m for m in ctx.registry.models("transcription") if m.compatible]
+    """The user's pick when there is one, otherwise the automatic choice; `auto_model` always
+    says what Automatic would take so the UI can show it next to a manual selection."""
+    auto = _auto_transcription(ctx)
     chosen_id = ctx.settings.get("models.whisper")
-    if chosen_id:
-        m = ctx.registry.model(chosen_id)
-        if m and m.compatible:
-            return Resolution(task="transcription", status="ready", model=m, provider="faster_whisper",
-                              reason="Selected in Settings")
-        return Resolution(task="transcription", status="unavailable", provider="faster_whisper",
-                          reason="The selected Whisper model is no longer available. Choose another under Settings → Models.")
+    if not chosen_id:
+        return auto
+    m = ctx.registry.model(chosen_id)
+    if m and m.compatible:
+        return Resolution(task="transcription", status="ready", model=m, provider="faster_whisper",
+                          reason="Selected in Settings", auto_model=auto.model)
+    return Resolution(task="transcription", status="unavailable", provider="faster_whisper", auto_model=auto.model,
+                      reason="The selected Whisper model is no longer available. Choose another under Settings → Models.")
+
+
+def _auto_transcription(ctx: ResolverContext) -> Resolution:
+    models = [m for m in ctx.registry.models("transcription") if m.compatible]
     order = {"large-v3-turbo": 0, "turbo": 0, "large-v3": 1, "distil-large-v3": 2, "medium": 3, "large-v2": 4,
              "small": 5, "large": 6, "base": 7, "tiny": 8}
     src = {"our_app": 0, "huggingface": 1}
@@ -167,7 +174,7 @@ def resolve_transcription(ctx: ResolverContext) -> Resolution:
     if models:
         best = sorted(models, key=key)[0]
         where = {"our_app": "Installed", "huggingface": "Found in Hugging Face cache"}.get(best.source, "Found locally")
-        return Resolution(task="transcription", status="ready", model=best, provider="faster_whisper", reason=where)
+        return Resolution(task="transcription", status="ready", model=best, provider="faster_whisper", reason=where, auto_model=best)
     return Resolution(task="transcription", status="download_required", provider="faster_whisper",
                       download=_whisper_download(ctx), reason="No Whisper model installed yet")
 
@@ -183,20 +190,26 @@ def resolve_diarization(ctx: ResolverContext) -> Resolution:
 
 
 def resolve_llm(ctx: ResolverContext) -> Resolution:
+    auto = _auto_llm(ctx)
+    chosen_id = ctx.settings.get("models.ai")
+    if not chosen_id:
+        return auto
+    ollama = next((p for p in ctx.registry.providers() if p.id == "ollama"), None)
+    ollama_state = ollama.status if ollama else "not_found"
+    m = ctx.registry.model(chosen_id)
+    if m and m.source == "ollama" and m.compatible:
+        if ollama_state != "available":
+            return Resolution(task="llm", status="unavailable", model=m, provider="ollama", auto_model=auto.model,
+                              reason=f"{m.name} is installed, but the AI runtime is not running.")
+        return Resolution(task="llm", status="ready", model=m, provider="ollama", reason="Selected in Settings", auto_model=auto.model)
+    return Resolution(task="llm", status="unavailable", provider="ollama", auto_model=auto.model,
+                      reason="The selected AI model is no longer available. Choose another under Settings → Models.")
+
+
+def _auto_llm(ctx: ResolverContext) -> Resolution:
     ollama_models = [m for m in ctx.registry.models("llm") if m.source == "ollama" and m.compatible]
     ollama = next((p for p in ctx.registry.providers() if p.id == "ollama"), None)
     ollama_state = ollama.status if ollama else "not_found"
-
-    chosen_id = ctx.settings.get("models.ai")
-    if chosen_id:
-        m = ctx.registry.model(chosen_id)
-        if m and m.source == "ollama" and m.compatible:
-            if ollama_state != "available":
-                return Resolution(task="llm", status="unavailable", model=m, provider="ollama",
-                                  reason=f"{m.name} is installed in Ollama, but Ollama is not running.")
-            return Resolution(task="llm", status="ready", model=m, provider="ollama", reason="Selected in Settings")
-        return Resolution(task="llm", status="unavailable", provider="ollama",
-                          reason="The selected AI model is no longer available in Ollama. Choose another under Settings → Models.")
 
     ranked = [m for m in sorted(ollama_models, key=lambda m: llm_score(m, ctx.memory_bytes), reverse=True)
               if llm_score(m, ctx.memory_bytes)[0] >= 0 and is_general_chat_model(m)]
@@ -204,7 +217,7 @@ def resolve_llm(ctx: ResolverContext) -> Resolution:
         best = ranked[0]
         reason = "Found in Ollama" + ("" if ollama_state == "available" else " (Ollama is not running)")
         return Resolution(task="llm", status="ready" if ollama_state == "available" else "unavailable", model=best,
-                          provider="ollama", reason=reason)
+                          provider="ollama", reason=reason, auto_model=best)
     if ollama_state in ("not_found", "installed_not_running"):
         return Resolution(task="llm", status="download_required", provider="ollama", download=_llm_download(ctx),
                           reason="Huddle installs a small local AI runtime together with this model — nothing to set up.")

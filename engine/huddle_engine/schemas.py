@@ -324,6 +324,8 @@ class Resolution(Schema):
     provider: str | None = None
     download: DownloadCandidate | None = None
     reason: str
+    # What Automatic would use on this Mac; differs from `model` only when the user picked one.
+    auto_model: LocalModel | None = None
 
 
 class SetupPlan(Schema):

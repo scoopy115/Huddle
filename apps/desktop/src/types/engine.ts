@@ -258,6 +258,7 @@ export interface Resolution {
   provider: string | null;
   download: DownloadCandidate | null;
   reason: string;
+  autoModel: LocalModel | null;
 }
 
 export interface HardwareInfo {
