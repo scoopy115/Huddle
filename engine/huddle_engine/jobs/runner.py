@@ -18,6 +18,7 @@ from typing import Any
 
 from ..db import Database
 from ..discovery.registry import Registry
+from ..providers import ollama_runtime
 from ..providers.base import ProviderError
 from ..providers.transcription import release_models
 from ..schemas import DEFAULT_PIPELINE, STAGES
@@ -104,8 +105,10 @@ class JobRunner:
             finally:
                 self._active = None
                 if self._q.empty():
-                    # Idle: give the memory back instead of keeping models warm indefinitely.
+                    # Idle: give the memory back instead of keeping models warm indefinitely, and stop
+                    # Huddle's own Ollama server (never the user's) — it restarts on demand.
                     release_models()
+                    ollama_runtime.stop()
 
     def _run(self, meeting_id: str, names: list[str]) -> None:
         self._cancelled.discard(meeting_id)
