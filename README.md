@@ -100,7 +100,7 @@ Huddle stands on excellent open-source work:
 
 * **Transcription:** [Whisper](https://github.com/openai/whisper) via [mlx-whisper](https://github.com/ml-explore/mlx-examples) and [CTranslate2](https://github.com/OpenNMT/CTranslate2)
 * **Speaker separation:** [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) with the [pyannote](https://github.com/pyannote/pyannote-audio) segmentation model and NVIDIA's TitaNet embeddings
-* **Notes:** [Ollama](https://ollama.com) running local models such as Qwen
+* **Notes:** [Ollama](https://ollama.com) running local models such as Qwen — installed by Huddle itself when it is not on your Mac
 * **App:** [Tauri](https://tauri.app), [React](https://react.dev), [Tailwind CSS](https://tailwindcss.com), [FastAPI](https://fastapi.tiangolo.com)
 
 Huddle is created by me with extensive assistance from **Claude Fable 5.1** (Anthropic) as

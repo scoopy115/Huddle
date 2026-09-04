@@ -1,6 +1,6 @@
-"""Ollama discovery. Running → documented REST API (/api/tags, /api/show).
-Installed but not running → read-only parse of the manifest store
-(~/.ollama/models/manifests). Ollama's storage is never modified."""
+"""Ollama discovery. A running server (the user's, or the one Huddle manages — see
+providers/ollama_runtime) → documented REST API (/api/tags). Otherwise → read-only parse of the
+manifest store (~/.ollama/models/manifests). Ollama's storage is never modified."""
 from __future__ import annotations
 
 import json
@@ -11,6 +11,7 @@ from pathlib import Path
 
 import httpx
 
+from ..providers import ollama_runtime
 from ..schemas import LocalModel, ProviderStatus
 from .common import RUNTIME_OLLAMA, is_embedding_model, llm_family_from_name
 
@@ -24,14 +25,17 @@ def _models_dir() -> Path:
 
 def installed() -> bool:
     return (_models_dir().exists() or shutil.which("ollama") is not None
-            or Path("/Applications/Ollama.app").exists())
+            or Path("/Applications/Ollama.app").exists() or ollama_runtime.binary() is not None)
 
 
-def _api_models() -> list[dict] | None:
+def _api_models() -> tuple[list[dict], str] | None:
+    url = ollama_runtime.active_url(start=False)
+    if not url:
+        return None
     try:
-        r = httpx.get(f"{OLLAMA_URL}/api/tags", timeout=1.5)
+        r = httpx.get(f"{url}/api/tags", timeout=1.5)
         r.raise_for_status()
-        return r.json().get("models", [])
+        return r.json().get("models", []), url
     except Exception:
         return None
 
@@ -68,9 +72,15 @@ def discover() -> tuple[ProviderStatus, list[LocalModel]]:
     now = time.time()
     api = _api_models()
     if api is not None:
+        raw, url = api
         status = ProviderStatus(id="ollama", kind="llm", name="Ollama", status="available",
-                                detail={"url": OLLAMA_URL, "modelCount": len(api)}, checked_at=now)
-        raw, running = api, True
+                                detail={"url": url, "modelCount": len(raw)}, checked_at=now)
+        running = True
+    elif ollama_runtime.binary() is not None:
+        # Not running, but Huddle can start it on demand: as good as available.
+        raw, running = _manifest_models(), False
+        status = ProviderStatus(id="ollama", kind="llm", name="Ollama", status="available",
+                                detail={"modelCount": len(raw), "modelsDir": str(_models_dir()), "managed": True}, checked_at=now)
     elif installed():
         raw, running = _manifest_models(), False
         status = ProviderStatus(id="ollama", kind="llm", name="Ollama", status="installed_not_running",

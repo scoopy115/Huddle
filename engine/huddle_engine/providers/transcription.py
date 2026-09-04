@@ -164,7 +164,7 @@ class FasterWhisperProvider:
         return self._transcriber(DETECT_MODEL).model
 
     def _transcribe_mixed(self, model, wav_path: str, prompt: str | None, progress: ProgressFn | None,
-                          cancelled: CancelFn | None, start_sec: float) -> tuple[list[Segment], str | None]:
+                          cancelled: CancelFn | None, start_sec: float, forced: str | None = None) -> tuple[list[Segment], str | None]:
         from faster_whisper.audio import decode_audio
         from faster_whisper.vad import VadOptions, get_speech_timestamps
 
@@ -176,7 +176,7 @@ class FasterWhisperProvider:
         regions = [(s["start"] / sr, s["end"] / sr) for s in speech]
         if not regions:
             return [], None
-        lang = pick_language(self._detector(), audio, regions, sr, cancelled)
+        lang = forced or pick_language(self._detector(), audio, regions, sr, cancelled)
         chunks = [(a, b, lang) for a, b in group_regions(regions)]
         total = sum(b - a for a, b, _ in chunks) or 1.0
         done = 0.0
@@ -227,7 +227,8 @@ class MlxWhisperProvider(FasterWhisperProvider):
                    cancelled: CancelFn | None = None, start_sec: float = 0.0) -> TranscriptResult:
         handle, _ = self.load()
         try:
-            out, lang = self._transcribe_mixed(handle, wav_path, handle._initial_prompt, progress, cancelled, start_sec)
+            forced = None if language in (None, "auto") else language
+            out, lang = self._transcribe_mixed(handle, wav_path, handle._initial_prompt, progress, cancelled, start_sec, forced=forced)
         except (ProviderError, Cancelled):
             raise
         except Exception as e:

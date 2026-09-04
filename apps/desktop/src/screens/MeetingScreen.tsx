@@ -4,7 +4,7 @@ import { RichTextEditor } from "@/components/RichTextEditor";
 import { api, errorMessage } from "@/lib/api";
 import type { ActionItem, AskResult, MeetingDetail, MeetingSpeaker } from "@/types/engine";
 import { fmtClock, fmtDate, fmtDuration, fmtDueDate, fmtTalkTime, fmtTime, languageName } from "@/lib/format";
-import { useNav } from "@/lib/nav";
+import { AI_MISSING_HINT, useNav } from "@/lib/nav";
 import { cn, speakerColor } from "@/lib/utils";
 import { AudioPlayer, type PlayerHandle } from "@/components/AudioPlayer";
 import { ProcessingStatus } from "@/components/ProcessingStatus";
@@ -16,7 +16,7 @@ const langLabel = (code: string | null) =>
   (code ?? "").split(",").filter(Boolean).map((c) => languageName(c)).join(", ");
 
 export function MeetingScreen({ id, seek, segmentId, nonce, onChanged }: { id: string; seek?: number; segmentId?: number; nonce?: number; onChanged: () => void }) {
-  const { go } = useNav();
+  const { go, ai } = useNav();
   const [d, setD] = useState<MeetingDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [time, setTime] = useState(0);
@@ -185,8 +185,8 @@ export function MeetingScreen({ id, seek, segmentId, nonce, onChanged }: { id: s
             <section className="mt-5">
               <SectionTitle>Ask this meeting</SectionTitle>
               <div className="flex gap-2">
-                <Input placeholder="What did we decide about the homepage?" value={ask} onChange={(e) => setAsk(e.target.value)} onKeyDown={(e) => e.key === "Enter" && doAsk()} />
-                <Button variant="primary" loading={asking} onClick={doAsk}><MessageSquareText className="h-3.5 w-3.5" /> Ask</Button>
+                <Input placeholder={ai.ready ? "What did we decide about the homepage?" : AI_MISSING_HINT} value={ask} onChange={(e) => setAsk(e.target.value)} onKeyDown={(e) => e.key === "Enter" && ai.ready && doAsk()} disabled={!ai.ready} />
+                <Button variant="primary" loading={asking} onClick={doAsk} disabled={!ai.ready} title={ai.ready ? undefined : AI_MISSING_HINT}><MessageSquareText className="h-3.5 w-3.5" /> Ask</Button>
               </div>
               {askResult && (
                 <div className="selectable mt-3 panel p-3">
@@ -206,7 +206,7 @@ export function MeetingScreen({ id, seek, segmentId, nonce, onChanged }: { id: s
             <section className="mt-7">
               <SectionTitle right={<div className="flex items-center gap-2">
                 {d.summary.provider === "extractive" && <span className="text-[11px] text-muted">Built-in notes · set up an AI model under Settings → Models for better summaries</span>}
-                <Button size="sm" variant="ghost" loading={refining} title="Correct names, add context or ask for changes — Huddle fixes the transcript and rewrites the notes" onClick={() => { setContextHtml(m.contextHtml ?? ""); setRefine(true); }}><Wand2 className="h-3.5 w-3.5" /> Refine notes</Button>
+                <Button size="sm" variant="ghost" loading={refining} disabled={!ai.ready} title={ai.ready ? "Correct names, add context or ask for changes — Huddle fixes the transcript and rewrites the notes" : AI_MISSING_HINT} onClick={() => { setContextHtml(m.contextHtml ?? ""); setRefine(true); }}><Wand2 className="h-3.5 w-3.5" /> Refine notes</Button>
               </div>}>Summary</SectionTitle>
               <p className="selectable text-[14px] leading-[1.65] text-fg/90">{d.summary.summary || <span className="text-muted">No summary.</span>}</p>
             </section>
@@ -241,11 +241,11 @@ export function MeetingScreen({ id, seek, segmentId, nonce, onChanged }: { id: s
           {(d.actionItems.length > 0 || d.summary) && (
             <section className="mt-7">
               <SectionTitle right={<div className="flex items-center gap-1">
-                <Button size="sm" variant="ghost" loading={generating || extracting} onClick={generateItems}><Sparkles className="h-3.5 w-3.5" /> {extracting ? "Reading the transcript…" : d.actionItems.length ? "Find again" : "Find action items"}</Button>
+                <Button size="sm" variant="ghost" loading={generating || extracting} disabled={!ai.ready} title={ai.ready ? undefined : AI_MISSING_HINT} onClick={generateItems}><Sparkles className="h-3.5 w-3.5" /> {extracting ? "Reading the transcript…" : d.actionItems.length ? "Find again" : "Find action items"}</Button>
                 <Button size="sm" variant="ghost" onClick={() => setEditingItem("new")}><Plus className="h-3.5 w-3.5" /> Add</Button>
               </div>}>Action items</SectionTitle>
               {editingItem === "new" && <ActionItemEditor speakers={d.speakers} onCancel={() => setEditingItem(null)} onSave={(b) => saveItem(null, b)} />}
-              {d.actionItems.length === 0 && editingItem !== "new" ? <div className="text-[13px] text-muted">{generating || extracting ? "Looking for commitments in the transcript… items appear here as they are found." : "No action items yet. Use “Find action items” to let the AI extract them, or add one yourself."}</div> : (
+              {d.actionItems.length === 0 && editingItem !== "new" ? <div className="text-[13px] text-muted">{generating || extracting ? "Looking for commitments in the transcript… items appear here as they are found." : ai.ready ? "No action items yet. Use “Find action items” to let the AI extract them, or add one yourself." : "No action items yet. Add one yourself, or download an AI model under Settings → Models to have them extracted."}</div> : (
                 <ul className="flex flex-col gap-1">
                   {d.actionItems.map((a) => editingItem === a.id ? (
                     <li key={a.id}><ActionItemEditor item={a} speakers={d.speakers} onCancel={() => setEditingItem(null)} onSave={(b) => saveItem(a, b)} /></li>

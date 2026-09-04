@@ -3,7 +3,7 @@ import { MessageSquareText, Send } from "lucide-react";
 import { api, errorMessage } from "@/lib/api";
 import type { Meeting, SearchHit } from "@/types/engine";
 import { fmtTime } from "@/lib/format";
-import { useNav } from "@/lib/nav";
+import { AI_MISSING_HINT, useNav } from "@/lib/nav";
 import { Button, Input, Spinner } from "@/components/ui";
 
 interface Turn { role: "user" | "assistant"; text: string; sources?: SearchHit[]; error?: boolean }
@@ -22,7 +22,7 @@ function suggestionsFor(meetings: Meeting[]): string[] {
 }
 
 export function AskScreen({ meetings }: { meetings: Meeting[] }) {
-  const { go } = useNav();
+  const { go, ai } = useNav();
   const [turns, setTurns] = useState<Turn[]>([]);
   const [q, setQ] = useState("");
   const [busy, setBusy] = useState(false);
@@ -57,7 +57,15 @@ export function AskScreen({ meetings }: { meetings: Meeting[] }) {
 
       <div className="flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-[760px] px-6 py-6">
-          {turns.length === 0 && (
+          {!ai.ready && (
+            <div className="flex flex-col items-center gap-3 pt-16 text-center">
+              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-fg/10 text-muted"><MessageSquareText className="h-6 w-6" /></div>
+              <div className="font-display text-[17px] font-bold tracking-tight">Ask needs an AI model</div>
+              <p className="max-w-md text-[13px] text-muted">{AI_MISSING_HINT} Transcripts and search keep working without one.</p>
+              <Button variant="primary" size="sm" onClick={() => go({ kind: "settings", section: "models" })}>Open Models</Button>
+            </div>
+          )}
+          {ai.ready && turns.length === 0 && (
             <div className="flex flex-col items-center gap-3 pt-16 text-center">
               <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-accent text-white glow-accent"><MessageSquareText className="h-6 w-6 text-white" /></div>
               <div className="font-display text-[17px] font-bold tracking-tight">Ask about your meetings</div>

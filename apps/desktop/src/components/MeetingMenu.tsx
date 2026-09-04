@@ -5,6 +5,7 @@ import { api, errorMessage } from "@/lib/api";
 import { native } from "@/lib/native";
 import { languageOptions } from "@/lib/languages";
 import { cn } from "@/lib/utils";
+import { AI_MISSING_HINT, useNav } from "@/lib/nav";
 import { Button, DangerDialog, Dialog, Select } from "@/components/ui";
 
 /** The subset of a meeting the actions need — satisfied by both the list item and the detail. */
@@ -120,6 +121,7 @@ const ITEM = "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left te
 
 /** The rows of the meeting menu; the caller decides where the popover sits. */
 export function MeetingMenuList({ onPick }: { onPick: (a: MeetingAction) => void }) {
+  const { ai } = useNav();
   return (
     <>
       {(["md", "txt", "json", "srt"] as const).map((f) => (
@@ -130,7 +132,7 @@ export function MeetingMenuList({ onPick }: { onPick: (a: MeetingAction) => void
       <button className={ITEM} onClick={() => onPick("export-audio")}><FileAudio className="h-3.5 w-3.5 text-muted" /> Export audio…</button>
       <div className="my-1 border-t border-border" />
       <button className={ITEM} onClick={() => onPick("language")}><Languages className="h-3.5 w-3.5 text-muted" /> Change spoken language…</button>
-      <button className={ITEM} onClick={() => onPick("summary")}><Sparkles className="h-3.5 w-3.5 text-muted" /> Regenerate summary</button>
+      <button className={cn(ITEM, !ai.ready && "cursor-not-allowed opacity-45 hover:bg-transparent")} disabled={!ai.ready} title={ai.ready ? undefined : AI_MISSING_HINT} onClick={() => onPick("summary")}><Sparkles className="h-3.5 w-3.5 text-muted" /> Regenerate summary</button>
       <button className={ITEM} onClick={() => onPick("reprocess")}><RotateCw className="h-3.5 w-3.5 text-muted" /> Reprocess meeting…</button>
       <div className="my-1 border-t border-border" />
       <button className={cn(ITEM, "text-danger hover:bg-danger/10")} onClick={() => onPick("delete")}><Trash2 className="h-3.5 w-3.5" /> Delete meeting</button>

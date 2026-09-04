@@ -74,6 +74,25 @@ def merge_small_clusters(X: np.ndarray, labels: np.ndarray, dur: np.ndarray,
     return labels
 
 
+def cluster_labels(X: np.ndarray, dur: np.ndarray, threshold: float, speaker_count: int | None, max_speakers: int) -> np.ndarray:
+    """Who is who. With a speaker-count hint the embeddings are cut into exactly that many
+    clusters (the hint is the user telling us the answer); without it, agglomerative clustering
+    at `threshold` decides, tiny clusters are folded away and the count is capped."""
+    from sklearn.cluster import AgglomerativeClustering
+
+    n = len(X)
+    if n == 1:
+        return np.zeros(1, dtype=int)
+    if speaker_count and speaker_count >= 1:
+        k = min(speaker_count, n)
+        if k == 1:
+            return np.zeros(n, dtype=int)
+        return AgglomerativeClustering(n_clusters=k, metric="cosine", linkage="average").fit_predict(X)
+    labels = AgglomerativeClustering(n_clusters=None, distance_threshold=threshold, metric="cosine", linkage="average").fit_predict(X)
+    labels = merge_small_clusters(X, labels, dur)
+    return limit_clusters(X, labels, max_speakers)
+
+
 def limit_clusters(X: np.ndarray, labels: np.ndarray, max_count: int) -> np.ndarray:
     """Merge the two most similar clusters until at most `max_count` remain (speaker-count hint)."""
     labels = labels.copy()
@@ -188,8 +207,6 @@ class SherpaDiarizationProvider:
                 cancelled: Callable[[], bool] | None = None) -> DiarizationOutput:
         import sherpa_onnx
         import soundfile as sf
-        from sklearn.cluster import AgglomerativeClustering
-
         if not segments:
             return DiarizationOutput(segments=[], provider=self.id, embedding_model=self.embedding_id)
         try:
@@ -258,13 +275,7 @@ class SherpaDiarizationProvider:
             dur = np.array([b - a for _, a, b in windows], dtype=np.float32)
 
             # 3. who is who
-            if len(X) == 1:
-                labels = np.zeros(1, dtype=int)
-            else:
-                labels = AgglomerativeClustering(n_clusters=None, distance_threshold=self.threshold,
-                                                 metric="cosine", linkage="average").fit_predict(X)
-            labels = merge_small_clusters(X, labels, dur)
-            labels = limit_clusters(X, labels, self.speaker_count or self.max_speakers)
+            labels = cluster_labels(X, dur, self.threshold, self.speaker_count, self.max_speakers)
 
             # 4. turn → speaker (duration-weighted vote of its windows), stable numbering
             votes: dict[int, dict[int, float]] = {}

@@ -17,8 +17,8 @@ from pathlib import Path
 import httpx
 
 from .db import Database
-from .discovery.ollama import OLLAMA_URL
 from .discovery.registry import Registry
+from .providers import ollama_runtime
 from .schemas import DownloadCandidate, DownloadProgress
 
 log = logging.getLogger(__name__)
@@ -72,7 +72,8 @@ class DownloadManager:
         """Remove a model Huddle pulled. Refuses anything Huddle did not pull."""
         if name not in self.pulled_by_huddle():
             raise PermissionError(f"{name} was not installed by Huddle; remove it with Ollama itself.")
-        r = httpx.request("DELETE", f"{OLLAMA_URL}/api/delete", json={"model": name}, timeout=30)
+        url = ollama_runtime.active_url() or ollama_runtime.SYSTEM_URL
+        r = httpx.request("DELETE", f"{url}/api/delete", json={"model": name}, timeout=30)
         if r.status_code not in (200, 404):
             r.raise_for_status()
         pulled = [p for p in self.pulled_by_huddle() if p != name]
@@ -118,8 +119,22 @@ class DownloadManager:
 
     def _pull_ollama(self, cand: DownloadCandidate) -> str:
         name = cand.url
+        url = ollama_runtime.active_url()
+        if url is None:
+            if ollama_runtime.binary() is None:
+                # First AI model on a Mac without Ollama: fetch Huddle's own runtime first.
+                self._update(cand.id, total_bytes=ollama_runtime.ARCHIVE_SIZE, received_bytes=0)
+                try:
+                    ollama_runtime.install(progress=lambda r, t: self._update(cand.id, received_bytes=r, total_bytes=t or ollama_runtime.ARCHIVE_SIZE),
+                                           cancelled=lambda: cand.id in self._cancel)
+                except InterruptedError:
+                    raise _Cancelled() from None
+            if not ollama_runtime.ensure_started():
+                raise RuntimeError("The local AI runtime could not be started. See models/ollama/ollama.log.")
+            url = ollama_runtime.MANAGED_URL
+            self._update(cand.id, total_bytes=cand.size_bytes, received_bytes=0)
         try:
-            with httpx.stream("POST", f"{OLLAMA_URL}/api/pull", json={"model": name, "stream": True},
+            with httpx.stream("POST", f"{url}/api/pull", json={"model": name, "stream": True},
                               timeout=httpx.Timeout(30, read=None)) as r:
                 r.raise_for_status()
                 for line in r.iter_lines():
@@ -135,7 +150,7 @@ class DownloadManager:
                     if ev.get("status") == "success":
                         break
         except httpx.ConnectError as e:
-            raise RuntimeError("Ollama is not running. Start Ollama and try again.") from e
+            raise RuntimeError("The local AI runtime stopped responding during the download. Try again.") from e
         self._update(cand.id, state="verifying")
         self._remember_pull(name)
         return f"ollama:{name}"

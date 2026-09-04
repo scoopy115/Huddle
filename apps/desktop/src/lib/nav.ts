@@ -11,9 +11,14 @@ export type View =
   | { kind: "settings"; section?: string }
   | { kind: "onboarding" };
 
-export const NavContext = createContext<{ view: View; go: (v: View) => void }>({
+/** Whether summaries, Ask, Refine and action-item extraction can run (an AI model is resolved). */
+export interface AiState { ready: boolean; reason: string | null; refresh: () => void }
+export const AI_MISSING_HINT = "Needs an AI model — download one under Settings → Models.";
+
+export const NavContext = createContext<{ view: View; go: (v: View) => void; ai: AiState }>({
   view: { kind: "meetings" },
   go: () => {},
+  ai: { ready: true, reason: null, refresh: () => {} },
 });
 
 export const useNav = () => useContext(NavContext);

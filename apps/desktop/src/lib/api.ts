@@ -120,7 +120,7 @@ export const api = {
   deleteApiKey: (id: number) => del<{ ok: boolean }>(`/mcp/keys/${id}`),
 
   // live transcription while recording
-  liveStart: (recordingId: string, filePath: string) => post<LiveStatus>("/live/start", { recordingId, filePath }),
+  liveStart: (recordingId: string, filePath: string, language: string | null = null) => post<LiveStatus>("/live/start", { recordingId, filePath, language }),
   liveStatus: (recordingId: string) => get<LiveStatus>(`/live/${recordingId}`),
   liveStop: (recordingId: string, final = true) => post<LiveStatus>(`/live/${recordingId}/stop${q({ final })}`),
   generateActionItems: (meetingId: string) => post<ProcessingJob>(`/meetings/${meetingId}/action-items/generate`),

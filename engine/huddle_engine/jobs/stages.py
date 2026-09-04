@@ -137,8 +137,10 @@ def transcribing(ctx: StageContext) -> str:
     # Reuse what was transcribed live while recording; only the tail is new work.
     rec = ms.get_recording(ctx.db, ctx.meeting_id)
     live, covered = live_segments_for(ctx.db, ctx.meeting_id) if rec else ([], 0.0)
+    if language != "auto" and not (live and all(getattr(seg, "language", None) == language for seg in live)):
+        live, covered = [], 0.0            # forced language the live pass did not use: redo everything
     duration = rec.duration_sec or 0.0 if rec else 0.0
-    if live and duration and covered >= duration - 2.0 and language == "auto":
+    if live and duration and covered >= duration - 2.0:
         segments, lang_list = live, _language_list(live)
         ctx.report(1.0)
         reused = "live transcript reused"
@@ -148,8 +150,6 @@ def transcribing(ctx: StageContext) -> str:
                                          progress=ctx.report, cancelled=ctx.cancelled, start_sec=covered if live else 0.0)
         except Cancelled:
             raise JobCancelled()
-        if live and language != "auto":
-            live = []                        # user forced a language: redo everything in that language
         segments = list(live) + result.segments if live else result.segments
         if live:
             segments = split_at_pauses(segments)

@@ -58,6 +58,7 @@ def test_ollama_manifest_parsing_when_not_running(tmp_path, monkeypatch):
     tag.write_text(json.dumps({"layers": [{"size": 5_000_000_000}, {"size": 1_000}]}))
     monkeypatch.setenv("OLLAMA_MODELS", str(mdir))
     monkeypatch.setattr(ollama, "_api_models", lambda: None)
+    monkeypatch.setattr(ollama.ollama_runtime, "binary", lambda: None)   # no startable runtime on this machine
     status, models = ollama.discover()
     assert status.status == "installed_not_running"
     assert models[0].id == "ollama:qwen3.5:9b" and models[0].size_bytes == 5_000_001_000
@@ -69,6 +70,7 @@ def test_ollama_not_found(monkeypatch, tmp_path):
     monkeypatch.setenv("OLLAMA_MODELS", str(tmp_path / "nope"))
     monkeypatch.setattr(ollama, "_api_models", lambda: None)
     monkeypatch.setattr(ollama, "installed", lambda: False)
+    monkeypatch.setattr(ollama.ollama_runtime, "binary", lambda: None)
     status, models = ollama.discover()
     assert status.status == "not_found" and models == []
 
@@ -115,7 +117,11 @@ def _oll(name, params, running=True, family="qwen3"):
                       meta={"parameterSize": f"{params}B", "running": running})
 
 
-def test_resolution_priority_and_storage(db, cfg):
+def test_resolution_priority_and_storage(db, cfg, monkeypatch):
+    from pathlib import Path
+
+    from huddle_engine.providers import ollama_runtime
+    monkeypatch.setattr(ollama_runtime, "binary", lambda: Path("/usr/bin/true"))   # an Ollama exists: no runtime download in the total
     # Nothing local, Ollama running → whisper download + ollama pull recommended.
     ctx = _ctx(db, cfg, [])
     res = resolve_all(ctx)
@@ -127,9 +133,9 @@ def test_resolution_priority_and_storage(db, cfg):
     small = resolve_all(_ctx(db, cfg, [], mem=8 * GB))
     assert small[2].download.url == "qwen3.5:4b"
 
-    # Ollama not installed → unavailable with install guidance, nothing to download yet.
+    # Ollama not installed → still downloadable: Huddle brings its own runtime along.
     r = resolve_llm(_ctx(db, cfg, [], ollama_status="not_found"))
-    assert r.status == "unavailable" and "Install" in r.reason
+    assert r.status == "download_required" and "runtime" in r.reason and r.download.url == "qwen3.5:4b"
 
     # Ollama has models → the general chat model in the recommended band wins; coder model skipped.
     q9 = _oll("qwen3.5:9b", 9.7, family="qwen35")

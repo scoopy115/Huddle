@@ -35,6 +35,29 @@ export default function App() {
   const [onboarded, setOnboarded] = useState<boolean | null>(null);
   const [unfinished, setUnfinished] = useState<RecordingMeta[]>([]);
   const [toast, setToast] = useState<string | null>(null);
+  // AI availability: the llm resolution from the setup plan. Polled while missing so a download
+  // finishing in Settings lights the features up without a restart.
+  const [ai, setAi] = useState<{ ready: boolean; reason: string | null }>({ ready: true, reason: null });
+  // The setup screen returns on every launch while a Whisper or AI model is missing; "Skip for
+  // now" only hides it for the rest of this session.
+  const [needsSetup, setNeedsSetup] = useState(false);
+  const [setupDismissed, setSetupDismissed] = useState(false);
+  const refreshAi = useCallback(async () => {
+    try {
+      const plan = await api.setupPlan();
+      const llm = plan.resolutions.find((r) => r.task === "llm");
+      setAi({ ready: llm?.status === "ready", reason: llm?.reason ?? null });
+      const ok = (s: string | undefined) => s === "ready" || s === "builtin";
+      setNeedsSetup(plan.resolutions.some((r) => (r.task === "transcription" || r.task === "llm") && !ok(r.status)));
+    } catch { /* engine not reachable yet */ }
+  }, []);
+  useEffect(() => {
+    if (engine.state !== "ready") return;
+    refreshAi();
+    if (ai.ready && !needsSetup) return;
+    const t = setInterval(refreshAi, 15000);
+    return () => clearInterval(t);
+  }, [engine.state, ai.ready, needsSetup, refreshAi]);
   const [palette, setPalette] = useState(false);
 
   const go = useCallback((v: View) => setView(v.kind === "meeting" ? { ...v, nonce: Date.now() } : v), []);
@@ -221,7 +244,9 @@ export default function App() {
         </div>
       );
     }
-    if (!onboarded && view.kind !== "settings") return <OnboardingScreen onDone={() => setOnboarded(true)} />;
+    if ((!onboarded || (needsSetup && !setupDismissed)) && view.kind !== "settings") {
+      return <OnboardingScreen returning={!!onboarded} onDone={() => { setOnboarded(true); setSetupDismissed(true); refreshAi(); }} />;
+    }
     switch (view.kind) {
       case "meetings": return <MeetingsScreen meetings={meetings} loading={loading} onImport={importAudio} onChanged={refreshMeetings} />;
       case "meeting": return <MeetingScreen id={view.id} seek={view.seek} segmentId={view.segmentId} nonce={view.nonce} onChanged={refreshMeetings} />;
@@ -231,12 +256,12 @@ export default function App() {
       case "processes": return <ProcessesScreen onChanged={refreshMeetings} />;
       case "actions": return <ActionItemsScreen onChanged={refreshMeetings} />;
       case "settings": return <SettingsScreen section={view.section} engine={engine} />;
-      case "onboarding": return <OnboardingScreen onDone={() => { setOnboarded(true); go({ kind: "meetings" }); }} />;
+      case "onboarding": return <OnboardingScreen returning={!!onboarded} onDone={() => { setOnboarded(true); setSetupDismissed(true); refreshAi(); go({ kind: "meetings" }); }} />;
     }
   };
 
   return (
-    <NavContext.Provider value={{ view, go }}>
+    <NavContext.Provider value={{ view, go, ai: { ...ai, refresh: refreshAi } }}>
       <div className="flex h-full">
         <Sidebar engine={engine} openActions={openActions} recording={recording} running={running} />
         <main className="relative min-w-0 flex-1 bg-bg">

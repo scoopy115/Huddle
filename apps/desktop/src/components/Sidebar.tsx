@@ -2,7 +2,7 @@ import { Activity, ArrowUpCircle, CheckSquare, MessageSquareText, Mic, Search, S
 import { cn, modKey } from "@/lib/utils";
 import { sounds } from "@/lib/sounds";
 import { showUpdatePrompt, useUpdates } from "@/lib/updates";
-import { useNav, type View } from "@/lib/nav";
+import { AI_MISSING_HINT, useNav, type View } from "@/lib/nav";
 import type { EngineStatus } from "@/lib/native";
 import logo from "@/assets/huddle-logo.svg";
 
@@ -18,13 +18,16 @@ function UpdateAvailable() {
   );
 }
 
-function NavItem({ icon: Icon, label, active, onClick, count, hint }: { icon: LucideIcon; label: string; active: boolean; onClick: () => void; count?: number; hint?: string }) {
+function NavItem({ icon: Icon, label, active, onClick, count, hint, disabled, title }: { icon: LucideIcon; label: string; active: boolean; onClick: () => void; count?: number; hint?: string; disabled?: boolean; title?: string }) {
   return (
     <button
       onClick={() => { if (!active) sounds.nav(); onClick(); }}
+      title={title}
+      aria-disabled={disabled || undefined}
       className={cn(
         "pressable group relative flex w-full items-center gap-2.5 rounded-lg px-2.5 py-[7px] text-[13px] font-medium",
         active ? "bg-surface text-fg shadow-[0_1px_2px_rgb(28_25_24/0.06)] dark:bg-fg/[0.07] dark:shadow-none" : "text-fg/65 hover:bg-fg/[0.04] hover:text-fg",
+        disabled && "opacity-45 saturate-0",
       )}
     >
       {/* Active marker: the brand's red tick, like the one in section titles. */}
@@ -39,7 +42,7 @@ function NavItem({ icon: Icon, label, active, onClick, count, hint }: { icon: Lu
 }
 
 export function Sidebar({ engine, openActions, recording, running }: { engine: EngineStatus; openActions: number; recording: boolean; running: number }) {
-  const { view, go } = useNav();
+  const { view, go, ai } = useNav();
   const is = (k: View["kind"]) => view.kind === k || (k === "meetings" && view.kind === "meeting");
   const offline = engine.state === "failed" || engine.state === "stopped";
 
@@ -53,7 +56,7 @@ export function Sidebar({ engine, openActions, recording, running }: { engine: E
       </div>
       <nav className="relative flex flex-col gap-0.5 px-3">
         <NavItem icon={Mic} label="Meetings" active={is("meetings")} onClick={() => go({ kind: "meetings" })} hint={`${modKey}1`} />
-        <NavItem icon={MessageSquareText} label="Ask" active={is("ask")} onClick={() => go({ kind: "ask" })} hint={`${modKey}2`} />
+        <NavItem icon={MessageSquareText} label="Ask" active={is("ask")} onClick={() => go({ kind: "ask" })} hint={`${modKey}2`} disabled={!ai.ready} title={ai.ready ? undefined : AI_MISSING_HINT} />
         <NavItem icon={CheckSquare} label="Action Items" active={is("actions")} onClick={() => go({ kind: "actions" })} count={openActions} hint={`${modKey}3`} />
         <NavItem icon={Activity} label="Processes" active={is("processes")} onClick={() => go({ kind: "processes" })} count={running} hint={`${modKey}4`} />
         <NavItem icon={Search} label="Search" active={is("search")} onClick={() => go({ kind: "search" })} hint={`${modKey}K`} />

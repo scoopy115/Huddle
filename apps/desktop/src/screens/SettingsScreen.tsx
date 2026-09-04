@@ -8,6 +8,7 @@ import { checkForUpdates, useUpdates } from "@/lib/updates";
 import { api, errorMessage } from "@/lib/api";
 import { native, type AppInfo, type EngineStatus, type InputDevice } from "@/lib/native";
 import { PermissionsPanel, usePermissions } from "@/components/PermissionsPanel";
+import { useNav } from "@/lib/nav";
 import type { DownloadCandidate, DownloadProgress, Environment, KnownSpeaker, LocalModel, Resolution, StorageInfo, UserSettings } from "@/types/engine";
 import { fmtBytes, languageName } from "@/lib/format";
 import { languageOptions, systemLanguage } from "@/lib/languages";
@@ -34,11 +35,14 @@ export function SettingsScreen({ section, engine }: { section?: string; engine: 
   const [resolutions, setResolutions] = useState<Resolution[]>([]);
   const [error, setError] = useState<string | null>(null);
 
+  const { ai } = useNav();
   const load = useCallback(async () => {
     try {
       const [s, e, plan] = await Promise.all([api.getSettings(), api.environment(), api.setupPlan()]);
       setSettings(s); setEnv(e); setResolutions(plan.resolutions); setError(null);
+      ai.refresh();
     } catch (e) { setError(errorMessage(e)); }
+    // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   useEffect(() => { load(); }, [load]);
 

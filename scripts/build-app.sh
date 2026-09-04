@@ -43,6 +43,9 @@ echo "Built $APP"
 # certificate for local builds that keep their permissions, "-" (ad hoc, the default) otherwise.
 # macOS ties Microphone and System Audio permissions to the signature, so ad-hoc builds lose them
 # with every install. Notarization happens in scripts/package-release.sh.
+# Extended attributes (Finder info, provenance) on files inside the bundle make codesign refuse
+# the seal ("resource fork, Finder information, or similar detritus not allowed"); strip them first.
+xattr -cr "$APP"
 IDENTITY="${HUDDLE_SIGN_IDENTITY:--}"
 ENT="$ROOT/apps/desktop/src-tauri/entitlements"
 FLAGS=(--force --sign "$IDENTITY")

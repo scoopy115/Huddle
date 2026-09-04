@@ -11,7 +11,8 @@ import logo from "@/assets/huddle-logo.svg";
 
 const TASK_LABEL: Record<string, string> = { transcription: "Transcription", diarization: "Speaker detection", llm: "Meeting summaries" };
 
-export function OnboardingScreen({ onDone }: { onDone: () => void }) {
+/** `returning`: models went missing after onboarding (or were skipped); the permissions step is left out. */
+export function OnboardingScreen({ onDone, returning = false }: { onDone: () => void; returning?: boolean }) {
   const [step, setStep] = useState(0);
   const [plan, setPlan] = useState<SetupPlan | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -59,7 +60,7 @@ export function OnboardingScreen({ onDone }: { onDone: () => void }) {
   const finish = async () => { await api.updateSettings({ "onboarding.completed": true }); onDone(); };
   // Step 5 asks macOS for the two recording permissions while the user is watching, so the
   // prompts never appear later from a menu-bar recording (a background prompt bounces the Dock).
-  const toPermissions = () => setStep(5);
+  const toPermissions = () => { if (returning) { finish(); } else { setStep(5); } };
 
   return (
     <div className="flex h-full flex-col">
@@ -86,7 +87,7 @@ export function OnboardingScreen({ onDone }: { onDone: () => void }) {
           ) : plan && (
             <>
               <img src={logo} alt="Huddle" className="mb-5 h-9 w-auto select-none" draggable={false} />
-              <h1 className="font-display text-[26px] font-bold tracking-tight">{needed.length ? "Almost ready" : "Your Mac is ready"}</h1>
+              <h1 className="font-display text-[26px] font-bold tracking-tight">{needed.length ? (returning ? "A model is missing" : "Almost ready") : "Your Mac is ready"}</h1>
               <p className="mt-1 text-[13px] text-muted">
                 {plan.hardware.appleSilicon ? `${plan.hardware.cpuBrand ?? "Apple Silicon"} · ${fmtBytes(plan.hardware.memoryBytes)} unified memory · Metal acceleration` : plan.hardware.cpuBrand}
               </p>

@@ -27,6 +27,8 @@ class EngineContext:
         self.hardware = hardware_info()
         s = self.settings()
         apply_path_overrides(self.cfg, s)
+        from .providers import ollama_runtime
+        ollama_runtime.configure(self.cfg.models_dir)
         self.registry = Registry(self.db, self.cfg.models_dir)
         self.downloads = DownloadManager(self.cfg.models_dir, self.registry, self.db)
         self.jobs = JobRunner(self.db, self.cfg, self.registry, self.settings, self.hardware.get("memoryBytes"),

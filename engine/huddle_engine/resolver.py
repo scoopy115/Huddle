@@ -125,7 +125,13 @@ def _whisper_download(ctx: ResolverContext) -> DownloadCandidate:
 
 
 def _llm_download(ctx: ResolverContext) -> DownloadCandidate:
-    return next(c for c in LLM_CANDIDATES if c.recommended)
+    """The recommended AI model; when no Ollama is present the runtime download rides along."""
+    from .providers import ollama_runtime
+    cand = next(c for c in LLM_CANDIDATES if c.recommended)
+    if ollama_runtime.binary() is None:
+        cand = cand.model_copy(update={"size_bytes": cand.size_bytes + ollama_runtime.ARCHIVE_SIZE,
+                                       "purpose": cand.purpose + " · includes the local AI runtime"})
+    return cand
 
 
 def candidates_for(ctx: ResolverContext) -> list[DownloadCandidate]:
@@ -199,14 +205,11 @@ def resolve_llm(ctx: ResolverContext) -> Resolution:
         reason = "Found in Ollama" + ("" if ollama_state == "available" else " (Ollama is not running)")
         return Resolution(task="llm", status="ready" if ollama_state == "available" else "unavailable", model=best,
                           provider="ollama", reason=reason)
-    if ollama_state == "not_found":
-        return Resolution(task="llm", status="unavailable", provider="ollama", download=_llm_download(ctx),
-                          reason="Ollama is not installed. Install it from ollama.com, then Huddle can pull a model for you.")
-    if ollama_state == "installed_not_running":
-        return Resolution(task="llm", status="unavailable", provider="ollama", download=_llm_download(ctx),
-                          reason="Ollama is installed but not running. Start Ollama to pull a model.")
+    if ollama_state in ("not_found", "installed_not_running"):
+        return Resolution(task="llm", status="download_required", provider="ollama", download=_llm_download(ctx),
+                          reason="Huddle installs a small local AI runtime together with this model — nothing to set up.")
     return Resolution(task="llm", status="download_required", provider="ollama", download=_llm_download(ctx),
-                      reason="No suitable AI model in Ollama yet")
+                      reason="No suitable AI model yet")
 
 
 def resolve_all(ctx: ResolverContext) -> list[Resolution]:

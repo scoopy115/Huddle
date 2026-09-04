@@ -117,7 +117,7 @@ export function RecordScreen({
       setMeta(m);
       setElapsed(0);
       onRecordingStateChange(true);
-      api.liveStart(m.id, m.filePath).then(setLive).catch(() => { /* live text is best-effort */ });
+      api.liveStart(m.id, m.filePath, language === "auto" ? null : language).then(setLive).catch(() => { /* live text is best-effort */ });
     } catch (e) {
       const msg = errorMessage(e);
       setError(msg);

@@ -11,6 +11,7 @@ import traceback
 
 import httpx
 
+from . import ollama_runtime
 from .base import ProviderError
 
 OLLAMA_URL = "http://127.0.0.1:11434"
@@ -20,10 +21,19 @@ LMSTUDIO_URL = "http://127.0.0.1:1234"
 class OllamaProvider:
     id = "ollama"
 
-    def __init__(self, model: str, base_url: str = OLLAMA_URL, num_ctx: int = 16384):
+    def __init__(self, model: str, base_url: str | None = None, num_ctx: int = 16384):
         self.model = model
-        self.base_url = base_url.rstrip("/")
+        self._base_url = base_url.rstrip("/") if base_url else None
         self.num_ctx = num_ctx
+
+    @property
+    def base_url(self) -> str:
+        if self._base_url:
+            return self._base_url
+        url = ollama_runtime.active_url()
+        if not url:
+            raise ProviderError("The local AI runtime could not be started. Download it under Settings → Models, or start Ollama.")
+        return url
 
     def _chat(self, system: str, user: str, max_tokens: int, json_mode: bool) -> str:
         body = {
@@ -44,7 +54,7 @@ class OllamaProvider:
             data = r.json()
             return data["message"]["content"]
         except httpx.ConnectError as e:
-            raise ProviderError("Ollama is not running. Start Ollama or choose another AI provider.",
+            raise ProviderError("The local AI runtime stopped responding. Try again; Huddle restarts it when needed.",
                                 detail=str(e)) from e
         except httpx.HTTPStatusError as e:
             raise ProviderError(f"Ollama could not run '{self.model}'.",

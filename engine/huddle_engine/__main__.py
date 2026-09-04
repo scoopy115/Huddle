@@ -43,6 +43,8 @@ def _parent_watchdog() -> None:
                 os.kill(parent, 0)
             except ProcessLookupError:
                 logging.getLogger("huddle").warning("parent app %d is gone — shutting down engine", parent)
+                from .providers import ollama_runtime
+                ollama_runtime.stop()
                 os._exit(0)
             except PermissionError:
                 pass   # exists, but not ours to signal

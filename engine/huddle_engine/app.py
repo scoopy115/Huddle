@@ -351,6 +351,10 @@ def live_start(body: dict):
     if not rid or not path:
         raise HTTPException(400, "recordingId and filePath are required")
     provider, language = _whisper_provider()
+    # The Record screen's "Spoken language": forces the live pass so it never guesses another one.
+    chosen = str(body.get("language") or "").strip()
+    if chosen and chosen != "auto":
+        language = chosen
     ctx().live.start(rid, path, provider, language)
     return ctx().live.status(rid)
 
