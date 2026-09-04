@@ -1,9 +1,5 @@
 // Typed wrappers around the Tauri commands (native side). The UI never calls
 // `invoke` anywhere else, so the Rust boundary is documented in one place.
-//
-// Browser fallback (development only): when the UI runs outside Tauri
-// (`npm run dev` opened in a browser) and VITE_ENGINE_URL is set, engine calls go
-// straight to the engine over HTTP; native-only features are disabled.
 import { invoke, convertFileSrc } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
@@ -108,83 +104,6 @@ export interface EngineStatus {
 export interface SystemAudioSupport { supported: boolean; permission: "granted" | "denied" | "unknown"; message: string | null }
 export interface LocalePrefs { locale: string | null; force24Hour: boolean | null }
 
-export const isTauri = () => typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
-
-const DEV_ENGINE_URL: string | undefined = import.meta.env.VITE_ENGINE_URL;
-const DEV_ENGINE_TOKEN: string = import.meta.env.VITE_ENGINE_TOKEN ?? "";
-
-async function browserEngineFetch<T>(method: string, path: string, body?: unknown): Promise<T> {
-  const res = await fetch(`${DEV_ENGINE_URL}${path}`, {
-    method,
-    headers: { Authorization: `Bearer ${DEV_ENGINE_TOKEN}`, ...(body != null ? { "Content-Type": "application/json" } : {}) },
-    body: body != null ? JSON.stringify(body) : undefined,
-  });
-  const text = await res.text();
-  let value: unknown = null;
-  try { value = text ? JSON.parse(text) : null; } catch { value = text; }
-  if (!res.ok) {
-    const detail = (value as { detail?: unknown })?.detail;
-    throw `${res.status}: ${typeof detail === "string" ? detail : text}`;
-  }
-  return value as T;
-}
-
-const notInDesktop = () => Promise.reject("Recording requires the Huddle desktop app.");
-
-const browser = {
-  getPaths: async (): Promise<AppPaths> => {
-    const h = await browserEngineFetch<{ dataDir: string }>("GET", "/health");
-    return { dataDir: h.dataDir, recordingsDir: `${h.dataDir}/recordings`, logsDir: `${h.dataDir}/logs` };
-  },
-  detectHardware: () => browserEngineFetch<{ hardware: NativeHardware }>("GET", "/system/environment").then((e) => e.hardware),
-  listInputDevices: async (): Promise<InputDevice[]> => [],
-  startRecording: notInDesktop as (d: string | null, systemAudio?: boolean, systemDevice?: string | null) => Promise<RecordingMeta>,
-  stopRecording: notInDesktop as () => Promise<RecordingMeta>,
-  recordingStatus: async (): Promise<RecordingStatus> => ({ recording: false, meta: null, elapsedSec: 0 }),
-  listUnfinishedRecordings: async (): Promise<RecordingMeta[]> => [],
-  engineStatus: async (): Promise<EngineStatus> => ({ state: DEV_ENGINE_URL ? "ready" : "failed", port: null, message: DEV_ENGINE_URL ? null : "Set VITE_ENGINE_URL to run in a browser.", command: "browser dev mode", logPath: null }),
-  engineRestart: async (): Promise<EngineStatus> => browser.engineStatus(),
-  engineFetch: browserEngineFetch,
-  onLevel: async (_cb: (e: LevelEvent) => void): Promise<UnlistenFn> => () => {},
-  onEngineStatus: async (_cb: (e: EngineStatus) => void): Promise<UnlistenFn> => () => {},
-  onMenu: async (_cb: (id: string) => void): Promise<UnlistenFn> => () => {},
-  getMcpCommand: async (): Promise<McpCommand> => ({ program: "huddle-engine", args: ["mcp", "--data-dir", "…"], development: true }),
-  audioSrc: (meetingId: string, _path: string) => `${DEV_ENGINE_URL}/meetings/${meetingId}/audio?token=${encodeURIComponent(DEV_ENGINE_TOKEN)}`,
-  systemAudioSupport: async (): Promise<SystemAudioSupport> => ({ supported: false, permission: "unknown", message: "Only available in the desktop app." }),
-  requestSystemAudioPermission: async (): Promise<SystemAudioSupport> => ({ supported: false, permission: "unknown", message: null }),
-  openSystemAudioSettings: async () => {},
-  getLocalePrefs: async (): Promise<LocalePrefs> => ({ locale: navigator.language, force24Hour: null }),
-  saveTextFile: async (_path: string, _contents: string): Promise<void> => { throw new Error("Saving files is only available in the desktop app."); },
-  revealInFinder: async (_path: string): Promise<void> => { throw new Error("Only available in the desktop app."); },
-  networkProxyStart: async (_port: number, _targetPort: number): Promise<ProxyStatus> => ({ running: false, port: null, targetPort: null, error: "Network access needs the desktop app." }),
-  networkProxyStop: async (): Promise<ProxyStatus> => ({ running: false, port: null, targetPort: null, error: null }),
-  networkProxyStatus: async (): Promise<ProxyStatus> => ({ running: false, port: null, targetPort: null, error: null }),
-  openFirewallSettings: async (): Promise<void> => {},
-  getShellPrefs: async (): Promise<ShellPrefs> => ({ menuBar: false, inputDevice: null, systemAudio: false, sounds: true, systemAudioGranted: false }),
-  microphonePermission: async (): Promise<MicPermission> => "unknown",
-  requestMicrophonePermission: async (): Promise<MicPermission> => "unknown",
-  openMicrophoneSettings: async (): Promise<void> => {},
-  onShellPrefsChanged: async (_cb: (p: ShellPrefs) => void): Promise<UnlistenFn> => () => {},
-  setShellPrefs: async (patch: Partial<ShellPrefs>): Promise<ShellPrefs> => ({ menuBar: false, inputDevice: null, systemAudio: false, sounds: true, systemAudioGranted: false, ...patch } as ShellPrefs),
-  takePendingRecordings: async (): Promise<RecordingMeta[]> => [],
-  discardUnfinishedRecordings: async (_ids: string[]): Promise<void> => {},
-  appInfo: async (): Promise<AppInfo> => ({ version: "dev", build: "browser", bundlePath: null }),
-  checkForUpdates: async (): Promise<UpdateCheck> => ({ currentVersion: "dev", update: null }),
-  installUpdate: async (_assetUrl: string): Promise<InstallOutcome> => { throw new Error("Only available in the desktop app."); },
-  onUpdateProgress: async (_cb: (p: UpdateProgress) => void): Promise<UnlistenFn> => () => {},
-  copyFile: async (_src: string, _dst: string): Promise<number> => { throw new Error("Only available in the desktop app."); },
-  onRecordingStarted: async (_cb: (m: RecordingMeta) => void): Promise<UnlistenFn> => () => {},
-  onRecordingError: async (_cb: (message: string) => void): Promise<UnlistenFn> => () => {},
-  onRecordingWarning: async (_cb: (message: string) => void): Promise<UnlistenFn> => () => {},
-  onTrayShown: async (_cb: () => void): Promise<UnlistenFn> => () => {},
-  trayToggleRecording: async (): Promise<void> => { throw new Error("Only available in the desktop app."); },
-  trayOpenMain: async (): Promise<void> => {},
-  trayHide: async (): Promise<void> => {},
-  trayQuit: async (): Promise<void> => {},
-  setTrayBusy: async (_busy: boolean): Promise<void> => {},
-  onRecordingStopped: async (_cb: (m: RecordingMeta) => void): Promise<UnlistenFn> => () => {},
-};
-
 const desktop = {
   getPaths: () => invoke<AppPaths>("get_paths"),
   detectHardware: () => invoke<NativeHardware>("detect_hardware"),
@@ -247,4 +166,4 @@ export interface UpdateCheck { currentVersion: string; update: UpdateInfo | null
 export interface UpdateProgress { phase: string; downloaded: number; total: number | null }
 export interface InstallOutcome { installed: boolean; appPath: string; reason: string | null }
 
-export const native: typeof desktop = isTauri() ? desktop : (browser as typeof desktop);
+export const native = desktop;

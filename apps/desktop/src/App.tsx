@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { AlertTriangle } from "lucide-react";
 import { api, errorMessage } from "@/lib/api";
-import { isTauri, native, type EngineStatus, type RecordingMeta } from "@/lib/native";
+import { native, type EngineStatus, type RecordingMeta } from "@/lib/native";
 import { resetAudio, setSoundsEnabled, sounds } from "@/lib/sounds";
 import { syncNetworkProxy } from "@/lib/mcpProxy";
 import { syncShellPrefs } from "@/lib/shellPrefs";
@@ -13,7 +13,6 @@ import { NavContext, type View } from "@/lib/nav";
 import type { Meeting, UserSettings } from "@/types/engine";
 import { Sidebar } from "@/components/Sidebar";
 import { CommandPalette } from "@/components/CommandPalette";
-import { hasMod } from "@/lib/utils";
 import { configureLocale } from "@/lib/format";
 import { BrandMark, Button, Dialog, Spinner } from "@/components/ui";
 import { ActionItemsScreen } from "@/screens/ActionItemsScreen";
@@ -47,7 +46,6 @@ export default function App() {
   }, [engine.state]);
 
   const importAudio = useCallback(async () => {
-    if (!isTauri()) return;
     const picked = await open({ multiple: false, filters: [{ name: "Audio", extensions: ["wav", "mp3", "m4a", "mp4", "webm", "flac", "ogg", "aac", "mov"] }] });
     if (!picked) return;
     const path = typeof picked === "string" ? picked : (picked as { path: string }).path;
@@ -58,9 +56,8 @@ export default function App() {
     } catch (e) { setToast(errorMessage(e)); }
   }, [refreshMeetings, go]);
 
-  // Shortcuts. In the desktop app they are accelerators of the native menu (Rust builds it;
-  // macOS delivers them as `menu` events before the webview sees the key). The keydown
-  // handler only serves the browser dev build.
+  // Shortcuts are accelerators of the native menu (Rust builds it; macOS delivers them as
+  // `menu` events before the webview sees the key).
   const menuAction = useCallback((id: string) => {
     switch (id) {
       case "settings": go({ kind: "settings" }); break;
@@ -82,14 +79,7 @@ export default function App() {
   useEffect(() => {
     let un: (() => void) | undefined;
     native.onMenu(menuAction).then((u) => (un = u));
-    if (isTauri()) return () => un?.();
-    const KEYS: Record<string, string> = { ",": "settings", n: "new-recording", "1": "view-meetings", "2": "view-ask", "3": "view-actions", "4": "view-processes", k: "view-search" };
-    const onKey = (e: KeyboardEvent) => {
-      const id = hasMod(e) && !e.shiftKey && !e.altKey ? KEYS[e.key.toLowerCase()] : undefined;
-      if (id) { e.preventDefault(); menuAction(id); }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => { un?.(); window.removeEventListener("keydown", onKey); };
+    return () => un?.();
   }, [menuAction]);
 
   // Recordings started from the menu bar or ⌥⌘R: the shell records, the UI turns the result into
@@ -166,7 +156,7 @@ export default function App() {
           if ((sp.inputDevice ?? null) !== (s["recording.inputDevice"] ?? null)) patch["recording.inputDevice"] = sp.inputDevice;
           if (sp.systemAudio !== !!s["recording.systemAudio"]) patch["recording.systemAudio"] = sp.systemAudio;
           if (Object.keys(patch).length) s = await api.updateSettings(patch);
-        } catch { /* browser dev */ }
+        } catch { /* shell prefs unavailable */ }
         setSettings(s);
         setOnboarded(Boolean(s["onboarding.completed"]));
       } catch (e) { setToast(errorMessage(e)); }
@@ -177,7 +167,7 @@ export default function App() {
         setRecording(status.recording);
         const list = await native.listUnfinishedRecordings();
         if (!status.recording && list.length) setUnfinished(list);
-      } catch { /* native unavailable in browser dev */ }
+      } catch { /* recorder status unavailable */ }
     })();
   }, [engine.state, refreshMeetings]);
 

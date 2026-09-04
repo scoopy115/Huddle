@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from "react";
-import { isTauri, native, type UpdateInfo, type UpdateProgress } from "@/lib/native";
+import { native, type UpdateInfo, type UpdateProgress } from "@/lib/native";
 
 /**
  * One small store for the update flow, shared by the auto-check in App, the "Check for updates"
@@ -47,7 +47,7 @@ export async function checkForUpdates({ manual = false } = {}): Promise<UpdateSt
 /** Start the periodic checks (idempotent); `enabled=false` stops them. */
 export function scheduleUpdateChecks(enabled: boolean) {
   if (timer) { clearInterval(timer); timer = null; }
-  if (!enabled || !isTauri()) return;
+  if (!enabled) return;
   if (!state.checkedAt) setTimeout(() => checkForUpdates(), 4000);
   timer = setInterval(() => checkForUpdates(), DAY);
 }

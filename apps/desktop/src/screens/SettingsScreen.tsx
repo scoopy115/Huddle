@@ -6,7 +6,7 @@ import { setSoundsEnabled } from "@/lib/sounds";
 import { syncShellPrefs } from "@/lib/shellPrefs";
 import { checkForUpdates, useUpdates } from "@/lib/updates";
 import { api, errorMessage } from "@/lib/api";
-import { isTauri, native, type AppInfo, type EngineStatus, type InputDevice } from "@/lib/native";
+import { native, type AppInfo, type EngineStatus, type InputDevice } from "@/lib/native";
 import { PermissionsPanel, usePermissions } from "@/components/PermissionsPanel";
 import type { DownloadCandidate, DownloadProgress, Environment, KnownSpeaker, LocalModel, Resolution, StorageInfo, UserSettings } from "@/types/engine";
 import { fmtBytes, languageName } from "@/lib/format";
@@ -191,7 +191,7 @@ function General({ settings, update }: { settings: UserSettings; update: Update 
           )}
         </div>
         <Row label="Storage location" hint={storage?.dataDir ?? ""}>
-          {isTauri() && <Button size="sm" onClick={() => storage && native.revealInFinder(storage.dataDir).catch(() => {})}><FolderOpen className="h-3.5 w-3.5" /> Show in Finder</Button>}
+          <Button size="sm" onClick={() => storage && native.revealInFinder(storage.dataDir).catch(() => {})}><FolderOpen className="h-3.5 w-3.5" /> Show in Finder</Button>
         </Row>
       </Card>
     </>
@@ -485,7 +485,7 @@ function UpdateRow() {
     : u.checkedAt ? `You have the latest version${u.currentVersion ? ` (${u.currentVersion})` : ""}.` : "";
   return (
     <Row label="Update Huddle" hint={status}>
-      {isTauri() && <Button size="sm" loading={u.checking} onClick={() => { setTouched(true); checkForUpdates({ manual: true }); }}><RefreshCw className="h-3.5 w-3.5" /> Check for updates</Button>}
+      <Button size="sm" loading={u.checking} onClick={() => { setTouched(true); checkForUpdates({ manual: true }); }}><RefreshCw className="h-3.5 w-3.5" /> Check for updates</Button>
     </Row>
   );
 }
@@ -513,10 +513,10 @@ function Advanced({ settings, env, engine, update, resolutions }: { settings: Us
     <>
       <Card>
         <Row label="Model folder" hint={storage?.modelsDir ?? ""}>
-          {isTauri() && <Button size="sm" onClick={() => pick("models")}><FolderOpen className="h-3.5 w-3.5" /> Change…</Button>}
+          <Button size="sm" onClick={() => pick("models")}><FolderOpen className="h-3.5 w-3.5" /> Change…</Button>
         </Row>
         <Row label="Logs folder" hint={storage?.logsDir ?? ""}>
-          {isTauri() && <Button size="sm" onClick={() => pick("logs")}><FolderOpen className="h-3.5 w-3.5" /> Change…</Button>}
+          <Button size="sm" onClick={() => pick("logs")}><FolderOpen className="h-3.5 w-3.5" /> Change…</Button>
         </Row>
         <Row label="Developer mode">
           <Switch checked={dev} onChange={(v) => update({ "developer.mode": v })} />

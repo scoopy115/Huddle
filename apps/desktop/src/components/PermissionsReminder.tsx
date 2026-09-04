@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { isTauri, native } from "@/lib/native";
+import { native } from "@/lib/native";
 import { PermissionsPanel, allGranted, usePermissions } from "@/components/PermissionsPanel";
 import { Button, Dialog } from "@/components/ui";
 
@@ -14,7 +14,7 @@ export function PermissionsReminder() {
   const [open, setOpen] = useState(false);
   const [decided, setDecided] = useState(false);
   useEffect(() => {
-    if (!isTauri() || decided || perms.checking) return;
+    if (decided || perms.checking) return;
     setDecided(true);
     (async () => {
       let mic = perms.mic;

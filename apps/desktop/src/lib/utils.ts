@@ -8,9 +8,6 @@ export function cn(...inputs: ClassValue[]) {
 /** macOS uses ⌘ for app shortcuts; Windows/Linux builds use Ctrl. */
 export const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
 export const modKey = isMac ? "⌘" : "Ctrl+";
-/** True when the platform's command modifier is held for this key event. */
-export const hasMod = (e: KeyboardEvent | { metaKey: boolean; ctrlKey: boolean }) => (isMac ? e.metaKey : e.ctrlKey);
-
 /** Subtle, accessible speaker differentiation — 8 hues, low saturation. `solid` is for avatars with white initials. */
 export const SPEAKER_COLORS = [
   { dot: "bg-sky-500/80", solid: "bg-sky-500", text: "text-sky-700 dark:text-sky-300", bg: "bg-sky-500/10" },

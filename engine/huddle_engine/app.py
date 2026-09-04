@@ -81,7 +81,7 @@ def _sync_mcp_network() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global _ctx
-    # HUDDLE_NO_JOBS=1: a second engine (browser dev mode) must not process jobs alongside the app's engine.
+    # HUDDLE_NO_JOBS=1: a second engine (e.g. tests, a CLI next to the app) must not process jobs alongside the app's engine.
     _ctx = EngineContext(start_jobs=not os.getenv("HUDDLE_NO_JOBS"))
     try:
         _ctx.registry.quick_check()
@@ -107,13 +107,6 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Huddle Engine", version=__version__, lifespan=lifespan)
-
-# Development only: lets the React app run in a plain browser (npm run dev) against the
-# engine. Never set in the packaged app — the desktop shell talks to the engine via Rust.
-if os.getenv("HUDDLE_DEV_CORS"):
-    from fastapi.middleware.cors import CORSMiddleware
-    app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:1420", "http://127.0.0.1:1420"],
-                       allow_methods=["*"], allow_headers=["*"])
 
 
 @app.middleware("http")

@@ -19,7 +19,10 @@ apps/desktop/src-tauri/gen/
 # Local data & models never belong in git
 *.gguf
 *.wav
+# never any environment file, whatever the suffix
 .env
+.env.*
+*.env
 
 # bundled speaker models (fetched by scripts/fetch-speaker-models.sh)
 apps/desktop/src-tauri/resources/models/
@@ -34,3 +37,17 @@ apps/desktop/src-tauri/binaries/
 # internal engineering notes (decisions, audit, packaging) stay local
 docs/
 CHANGELOG.md
+
+# certificates, signing keys and provisioning profiles never belong in git
+*.p12
+*.pfx
+*.cer
+*.p8
+*.pem
+*.key
+*.mobileprovision
+*.provisionprofile
+AuthKey_*
+
+# local assistant/tooling state
+.claude/

@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Huddle",
-  "version": "0.4.10",
+  "version": "0.4.11",
   "identifier": "com.huddle.desktop",
   "mainBinaryName": "Huddle",
   "build": {
@@ -66,7 +66,9 @@
       "icons/icon.ico"
     ],
     "macOS": {
-      "minimumSystemVersion": "14.2"
+      "minimumSystemVersion": "14.2",
+      "entitlements": "entitlements/app.plist",
+      "hardenedRuntime": true
     },
     "externalBin": [
       "binaries/huddle-audio-tap"
