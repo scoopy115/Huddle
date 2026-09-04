@@ -425,6 +425,10 @@ pub fn stop(app: &AppHandle) -> Result<RecordingMeta, String> {
 
     let mic_rate = active.mic.sample_rate;
     let mic_result = finish_capture(active.mic);
+    // A recording that actually captured system audio settles the permission question.
+    if active.system.as_ref().is_some_and(|t| t.heard.load(Ordering::Relaxed)) {
+        crate::shell_prefs::set_system_audio_granted(app, true);
+    }
     let sys_result = active.system.map(|t| t.stop().map(|_| 0u64));
 
     let data_dir = paths::data_dir(app).map_err(|e| e.to_string())?;

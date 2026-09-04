@@ -66,43 +66,74 @@ pub fn open_microphone_settings() -> Result<(), String> {
     Ok(())
 }
 
-/// Whether system audio capture is available at all (helper present, macOS 14.2+). macOS has no
-/// API for the "System Audio Recording Only" permission itself, so `permission` is "unknown";
-/// the UI points to System Settings instead of pretending to know.
-pub fn support() -> SystemAudioSupport {
+fn unsupported() -> Option<SystemAudioSupport> {
     if !cfg!(target_os = "macos") {
-        return SystemAudioSupport { supported: false, permission: "unknown".into(), message: Some("System audio capture is only available on macOS 14.2 or newer.".into()) };
+        return Some(SystemAudioSupport { supported: false, permission: "unknown".into(), message: Some("System audio capture is only available on macOS 14.2 or newer.".into()) });
     }
     if helper_path().is_none() {
-        return SystemAudioSupport { supported: false, permission: "unknown".into(), message: Some("The system audio helper is missing from this build.".into()) };
+        return Some(SystemAudioSupport { supported: false, permission: "unknown".into(), message: Some("The system audio helper is missing from this build.".into()) });
     }
-    SystemAudioSupport { supported: true, permission: "unknown".into(), message: None }
+    None
 }
 
-/// Creating a tap is what makes macOS ask (once, while undetermined); harmless afterwards.
-pub fn request_permission() -> SystemAudioSupport {
-    if let Some(helper) = helper_path() {
-        let _ = Command::new(helper).arg("request").output();
+fn answer(permission: &str) -> SystemAudioSupport {
+    SystemAudioSupport { supported: true, permission: permission.into(), message: None }
+}
+
+/// Run the helper's silent probe (≈0.6 s) and remember a granted answer.
+fn probe(app: &tauri::AppHandle) -> SystemAudioSupport {
+    if let Some(u) = unsupported() {
+        return u;
     }
-    support()
+    let Some(helper) = helper_path() else { return answer("unknown") };
+    match Command::new(&helper).arg("check").output() {
+        Ok(o) => {
+            let verdict = String::from_utf8_lossy(&o.stdout).lines().filter(|l| !l.trim().is_empty()).last().unwrap_or("").trim().to_string();
+            let granted = verdict == "granted";
+            log::info!("system audio probe: {verdict}{}", if o.stderr.is_empty() { String::new() } else { format!(" ({})", String::from_utf8_lossy(&o.stderr).trim()) });
+            crate::shell_prefs::set_system_audio_granted(app, granted);
+            answer(if granted { "granted" } else { "denied" })
+        }
+        Err(e) => SystemAudioSupport { supported: false, permission: "unknown".into(), message: Some(format!("Helper failed: {e}")) },
+    }
+}
+
+/// Availability plus the permission as far as it can be known: macOS has no query for it, so a
+/// remembered probe result stands in. Never probes while a recording runs (the tap is in use).
+pub fn support(app: &tauri::AppHandle) -> SystemAudioSupport {
+    if let Some(u) = unsupported() {
+        return u;
+    }
+    if crate::shell_prefs::load(app).system_audio_granted {
+        return answer("granted");
+    }
+    if crate::recording::is_recording(app) {
+        return answer("unknown");
+    }
+    probe(app)
 }
 
 #[tauri::command]
-pub fn system_audio_support() -> SystemAudioSupport {
-    support()
+pub async fn system_audio_support(app: tauri::AppHandle) -> SystemAudioSupport {
+    let a = app.clone();
+    tauri::async_runtime::spawn_blocking(move || support(&a)).await.unwrap_or_else(|_| answer("unknown"))
 }
 
+/// The same probe, forced: creating the tap is what makes macOS ask (once, while undetermined).
 #[tauri::command]
 pub async fn request_system_audio_permission(app: tauri::AppHandle) -> SystemAudioSupport {
     if crate::recording::is_recording(&app) {
-        return support();
+        return support(&app);
     }
-    tauri::async_runtime::spawn_blocking(request_permission).await.unwrap_or_else(|_| support())
+    let a = app.clone();
+    tauri::async_runtime::spawn_blocking(move || probe(&a)).await.unwrap_or_else(|_| answer("unknown"))
 }
 
 pub struct SystemTap {
     child: Child,
     pub level: Arc<Mutex<f32>>,
+    /// Set once any non-silent level arrived: proof that the permission is granted.
+    pub heard: Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl SystemTap {
@@ -119,6 +150,8 @@ impl SystemTap {
             .map_err(|e| format!("Could not start system audio capture: {e}"))?;
         let stdout = child.stdout.take().ok_or("no stdout")?;
         let level = Arc::new(Mutex::new(0f32));
+        let heard = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let heard_w = heard.clone();
         let (tx, rx) = std::sync::mpsc::channel::<Result<(), String>>();
         let lvl = level.clone();
         std::thread::spawn(move || {
@@ -129,6 +162,9 @@ impl SystemTap {
                     let _ = tx.send(Ok(()));
                 } else if let Some(v) = line.strip_prefix("level ") {
                     if let Ok(f) = v.trim().parse::<f32>() {
+                        if f > 0.0 {
+                            heard_w.store(true, std::sync::atomic::Ordering::Relaxed);
+                        }
                         if let Ok(mut g) = lvl.lock() {
                             *g = f;
                         }
@@ -140,7 +176,7 @@ impl SystemTap {
             }
         });
         match rx.recv_timeout(Duration::from_secs(15)) {
-            Ok(Ok(())) => Ok(SystemTap { child, level }),
+            Ok(Ok(())) => Ok(SystemTap { child, level, heard }),
             Ok(Err(_)) | Err(_) => {
                 let _ = child.kill();
                 let mut err = String::new();

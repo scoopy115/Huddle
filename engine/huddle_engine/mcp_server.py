@@ -38,7 +38,7 @@ def _date(ts: float | None) -> str | None:
 
 def build_server(cfg: EngineConfig | None = None) -> FastMCP:
     ctx = EngineContext(cfg, start_jobs=False)
-    mcp = FastMCP("huddle", instructions=(
+    mcp = FastMCP("Huddle", instructions=(
         "Local, private meeting memory. Use search_transcripts/search_meetings to find relevant moments, then "
         "get_transcript_context for surrounding lines. Every hit carries meetingId, segmentId and timestamps so "
         "answers can cite evidence. Avoid fetching whole transcripts unless the user asks for one."))

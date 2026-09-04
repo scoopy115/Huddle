@@ -14,12 +14,14 @@ pub struct ShellPrefs {
     pub input_device: Option<String>,
     pub system_audio: bool,
     pub sounds: bool,
+    /// macOS has no query for the system-audio permission; once a probe has seen it work, remember.
+    pub system_audio_granted: bool,
 }
 
 impl Default for ShellPrefs {
     /// A fresh install lives in the menu bar; the engine's `general.menuBar` default agrees.
     fn default() -> Self {
-        Self { menu_bar: true, input_device: None, system_audio: false, sounds: true }
+        Self { menu_bar: true, input_device: None, system_audio: false, sounds: true, system_audio_granted: false }
     }
 }
 
@@ -51,6 +53,15 @@ pub struct ShellPrefsPatch {
     pub input_device: Option<Option<String>>,
     pub system_audio: Option<bool>,
     pub sounds: Option<bool>,
+}
+
+/// Persist the outcome of a system-audio probe (called by the shell itself, not the UI).
+pub fn set_system_audio_granted(app: &AppHandle, granted: bool) {
+    let mut prefs = load(app);
+    if prefs.system_audio_granted != granted {
+        prefs.system_audio_granted = granted;
+        let _ = save(app, &prefs);
+    }
 }
 
 /// Merge a patch, persist it, and apply what has an immediate effect (the tray icon).

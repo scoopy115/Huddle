@@ -5,7 +5,7 @@ import type { DownloadProgress, Resolution, SetupPlan } from "@/types/engine";
 import { fmtBytes, languageName } from "@/lib/format";
 import { languageOptions, systemLanguage } from "@/lib/languages";
 import { native } from "@/lib/native";
-import { PermissionsPanel, micGranted, usePermissions } from "@/components/PermissionsPanel";
+import { PermissionsPanel, allGranted, usePermissions } from "@/components/PermissionsPanel";
 import { Button, Select } from "@/components/ui";
 import logo from "@/assets/huddle-logo.svg";
 
@@ -133,14 +133,17 @@ export function OnboardingScreen({ onDone }: { onDone: () => void }) {
 
 function PermissionsStep({ onDone }: { onDone: () => void }) {
   const perms = usePermissions();
-  const ok = micGranted(perms);
-  // Raise the one-time system-audio prompt here, while the user is watching.
-  useEffect(() => { native.requestSystemAudioPermission().catch(() => {}); }, []);
+  const ok = allGranted(perms);
+  // Raise the one-time system-audio prompt here, while the user is watching, and take its answer.
+  useEffect(() => {
+    native.requestSystemAudioPermission().then((system) => perms.setState((s) => ({ ...s, system }))).catch(() => {});
+    // oxlint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   return (
     <>
       <img src={logo} alt="Huddle" className="mb-5 h-9 w-auto select-none" draggable={false} />
       <h1 className="font-display text-[26px] font-bold tracking-tight">Allow recording</h1>
-      <p className="mt-1 text-[13px] text-muted">macOS asks once. Nothing is recorded until you press Record, and audio never leaves this Mac.</p>
+      <p className="mt-1 text-[13px] text-muted">macOS asks once for each. Nothing is recorded until you press Record, and audio never leaves this Mac.</p>
       <div className="mt-5"><PermissionsPanel perms={perms} /></div>
       <div className="mt-6 flex items-center justify-end gap-2">
         {!ok && <Button variant="ghost" onClick={onDone}>Later</Button>}

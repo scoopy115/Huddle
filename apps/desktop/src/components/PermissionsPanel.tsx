@@ -6,9 +6,9 @@ import { Button } from "@/components/ui";
 export interface PermissionState { mic: MicPermission; system: SystemAudioSupport | null; checking: boolean }
 
 /**
- * The microphone state comes from macOS. For system audio macOS offers no query at all (a tap
- * without permission just delivers silence), so the panel only points to System Settings; the
- * one-time macOS prompt is raised by creating a tap (`requestSystemAudioPermission`).
+ * The microphone state comes from macOS. For system audio macOS offers no query, so the shell
+ * probes the tap once with an inaudible tone and remembers a granted answer; the one-time macOS
+ * prompt is raised by the same tap creation.
  */
 export function usePermissions() {
   const [state, setState] = useState<PermissionState>({ mic: "unknown", system: null, checking: true });
@@ -19,22 +19,25 @@ export function usePermissions() {
   }, []);
   useEffect(() => { refresh(); }, [refresh]);
   useEffect(() => {
-    // Coming back from System Settings: check again while the microphone is still missing.
-    if (state.mic === "granted") return;
+    // Coming back from System Settings: check again while something is still missing.
+    if (allGranted(state)) return;
     const onFocus = () => { refresh(); };
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
-  }, [refresh, state.mic]);
+  }, [refresh, state]);
   return { ...state, refresh, setState };
 }
 
 export const micGranted = (p: PermissionState) => p.mic === "granted";
+export const allGranted = (p: PermissionState) => p.mic === "granted" && (p.system === null || !p.system.supported || p.system.permission === "granted");
 
 export function PermissionsPanel({ perms, compact = false }: { perms: ReturnType<typeof usePermissions>; compact?: boolean }) {
   const [busy, setBusy] = useState(false);
   const askMic = async () => { setBusy(true); try { const mic = await native.requestMicrophonePermission(); perms.setState((s) => ({ ...s, mic })); } finally { setBusy(false); } };
   const micOk = perms.mic === "granted";
   const sysSupported = perms.system?.supported !== false;
+  const sysOk = perms.system?.permission === "granted";
+  const sysUnknown = !perms.system || perms.system.permission === "unknown";
   const row = compact ? "flex items-center gap-3 px-3.5 py-2.5" : "flex items-center gap-3 px-4 py-3";
   return (
     <div className="panel overflow-hidden">
@@ -53,10 +56,15 @@ export function PermissionsPanel({ perms, compact = false }: { perms: ReturnType
         <div className="min-w-0 flex-1">
           <div className="text-[13.5px] font-medium">System audio</div>
           <div className="text-[12px] text-muted">
-            {sysSupported ? "macOS asks once, the first time Huddle records other apps. Managed under Privacy & Security → System Audio Recording." : (perms.system?.message ?? "Needs macOS 14.2 or newer.")}
+            {!sysSupported ? (perms.system?.message ?? "Needs macOS 14.2 or newer.")
+              : sysOk ? "Allowed"
+              : sysUnknown ? "Checking…"
+              : "Turned off. Allow Huddle under Privacy & Security → System Audio Recording."}
           </div>
         </div>
-        {sysSupported && <Button size="sm" onClick={() => native.openSystemAudioSettings()}>Open System Settings</Button>}
+        {!sysSupported || sysUnknown ? null
+          : sysOk ? <Check className="h-4 w-4 text-emerald-600" />
+          : <Button size="sm" onClick={() => native.openSystemAudioSettings()}>Open System Settings</Button>}
       </div>
     </div>
   );

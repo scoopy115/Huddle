@@ -33,3 +33,4 @@ apps/desktop/src-tauri/binaries/
 
 # internal engineering notes (decisions, audit, packaging) stay local
 docs/
+CHANGELOG.md

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { isTauri, native } from "@/lib/native";
-import { PermissionsPanel, micGranted, usePermissions } from "@/components/PermissionsPanel";
+import { PermissionsPanel, allGranted, usePermissions } from "@/components/PermissionsPanel";
 import { Button, Dialog } from "@/components/ui";
 
 /**
@@ -22,15 +22,16 @@ export function PermissionsReminder() {
         mic = await native.requestMicrophonePermission();
         perms.setState((s) => ({ ...s, mic }));
       }
-      native.requestSystemAudioPermission().catch(() => {});
-      if (mic !== "granted") setOpen(true);
+      const system = await native.requestSystemAudioPermission().catch(() => null);
+      if (system) perms.setState((s) => ({ ...s, system }));
+      if (mic !== "granted" || (system && system.supported && system.permission !== "granted")) setOpen(true);
     })();
   }, [perms, decided]);
-  useEffect(() => { if (open && micGranted(perms)) setOpen(false); }, [open, perms]);
+  useEffect(() => { if (open && allGranted(perms)) setOpen(false); }, [open, perms]);
   return (
     <Dialog open={open} onClose={() => setOpen(false)} title="Allow Huddle to record"
-      footer={<Button variant="primary" onClick={() => setOpen(false)}>Later</Button>}>
-      <p className="mb-3 text-muted">Huddle needs the microphone to record meetings. Nothing is recorded until you press Record.</p>
+      footer={<Button variant="primary" onClick={() => setOpen(false)}>{allGranted(perms) ? "Done" : "Later"}</Button>}>
+      <p className="mb-3 text-muted">Huddle needs these to record meetings. Nothing is recorded until you press Record.</p>
       <PermissionsPanel perms={perms} compact />
     </Dialog>
   );

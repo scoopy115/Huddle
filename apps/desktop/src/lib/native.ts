@@ -79,6 +79,7 @@ export interface ShellPrefs {
   inputDevice: string | null;
   systemAudio: boolean;
   sounds: boolean;
+  systemAudioGranted: boolean;
 }
 
 /** The shell's LAN forwarder for the network MCP server. */
@@ -159,12 +160,12 @@ const browser = {
   networkProxyStop: async (): Promise<ProxyStatus> => ({ running: false, port: null, targetPort: null, error: null }),
   networkProxyStatus: async (): Promise<ProxyStatus> => ({ running: false, port: null, targetPort: null, error: null }),
   openFirewallSettings: async (): Promise<void> => {},
-  getShellPrefs: async (): Promise<ShellPrefs> => ({ menuBar: false, inputDevice: null, systemAudio: false, sounds: true }),
+  getShellPrefs: async (): Promise<ShellPrefs> => ({ menuBar: false, inputDevice: null, systemAudio: false, sounds: true, systemAudioGranted: false }),
   microphonePermission: async (): Promise<MicPermission> => "unknown",
   requestMicrophonePermission: async (): Promise<MicPermission> => "unknown",
   openMicrophoneSettings: async (): Promise<void> => {},
   onShellPrefsChanged: async (_cb: (p: ShellPrefs) => void): Promise<UnlistenFn> => () => {},
-  setShellPrefs: async (patch: Partial<ShellPrefs>): Promise<ShellPrefs> => ({ menuBar: false, inputDevice: null, systemAudio: false, sounds: true, ...patch } as ShellPrefs),
+  setShellPrefs: async (patch: Partial<ShellPrefs>): Promise<ShellPrefs> => ({ menuBar: false, inputDevice: null, systemAudio: false, sounds: true, systemAudioGranted: false, ...patch } as ShellPrefs),
   takePendingRecordings: async (): Promise<RecordingMeta[]> => [],
   discardUnfinishedRecordings: async (_ids: string[]): Promise<void> => {},
   appInfo: async (): Promise<AppInfo> => ({ version: "dev", build: "browser", bundlePath: null }),

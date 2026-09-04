@@ -1,8 +1,8 @@
 [package]
 name = "huddle"
-version = "0.4.7"
+version = "0.4.9"
 description = "Huddle — private, local-first meeting recorder and knowledge base"
-authors = ["Huddle contributors"]
+authors = ["Dylan Kiesebrink"]
 license = "MIT"
 edition = "2021"
 rust-version = "1.77.2"

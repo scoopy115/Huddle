@@ -2,14 +2,19 @@
 // driver, no screen recording. The only permission involved is "System Audio Recording Only"
 // (NSAudioCaptureUsageDescription), which macOS asks for the first time a tap is created.
 //
+//   huddle-audio-tap check              → prints "granted" | "denied" (silent probe, see below; prompts if undetermined)
 //   huddle-audio-tap request            → creates a tap for a moment so macOS asks for permission (once); prints "unknown"
 //   huddle-audio-tap mic-check          → prints "granted" | "denied" | "undetermined" (Microphone permission)
 //   huddle-audio-tap mic-request        → asks for Microphone permission, prints "granted" | "denied"
 //   huddle-audio-tap record <out.wav>   → writes 16-bit mono 48 kHz WAV until stdin closes or SIGTERM
 //
-// macOS has no API to read the system-audio permission back (a tap without permission delivers
-// silence rather than an error), so nothing here pretends to know it. The WAV header is rewritten
-// every second so a crash still leaves a playable file.
+// macOS has no API to read the system-audio permission back, and a tap without permission delivers
+// silence rather than an error. `check` therefore probes: it runs a tap for 0.5 s while playing a
+// 1 kHz tone at −90 dBFS through the default output. That is below what any DAC or speaker can
+// reproduce (16-bit quantisation sits at −96 dBFS), but it is a non-zero float sample to the tap,
+// so hearing anything at all means capture works. The app remembers a "granted" answer, so the
+// probe normally runs once. The WAV header is rewritten every second so a crash still leaves a
+// playable file.
 import Foundation
 import AVFoundation
 import CoreAudio
@@ -65,6 +70,8 @@ final class TapRecorder {
     var writer: WavWriter?
     var format = AudioStreamBasicDescription()
     var lastLevel = Date()
+    /// Loudest sample seen so far (the probe's evidence that capture works).
+    var maxAbs: Float = 0
     /// The rate the aggregate device actually runs at. It follows the tapped output device, and
     /// the built-in speakers share a clock with the built-in microphone — so it changes when the
     /// microphone capture starts (48 → 24 kHz on a MacBook). The output stays 48 kHz; frames are
@@ -178,6 +185,7 @@ final class TapRecorder {
                 peak = max(peak, abs(v)); mono[f] = v
             }
         }
+        maxAbs = max(maxAbs, peak)
         callbacks += 1
         if callbacks % 100 == 0 { readDeviceRate() }  // belt and braces next to the listener
         if writer != nil {
@@ -209,6 +217,44 @@ final class TapRecorder {
             print("level \(peak)"); fflush(stdout)
         }
     }
+}
+
+/// A 1 kHz tone at −90 dBFS on the default output: inaudible, but non-zero to the tap.
+final class ProbeTone {
+    let engine = AVAudioEngine()
+    init() {
+        var phase: Float = 0
+        let step = Float(2 * Double.pi * 1000 / 48000)
+        let node = AVAudioSourceNode { _, _, frameCount, abl -> OSStatus in
+            let buffers = UnsafeMutableAudioBufferListPointer(abl)
+            for f in 0..<Int(frameCount) {
+                let v = sin(phase) * 0.00003
+                phase += step
+                for b in buffers { b.mData!.assumingMemoryBound(to: Float.self)[f] = v }
+            }
+            return noErr
+        }
+        engine.attach(node)
+        engine.connect(node, to: engine.mainMixerNode, format: AVAudioFormat(standardFormatWithSampleRate: 48000, channels: 1))
+        engine.connect(engine.mainMixerNode, to: engine.outputNode, format: nil)
+    }
+    func start() { try? engine.start() }
+    func stop() { engine.stop() }
+}
+
+/// "granted" when the tap hears anything within 0.5 s (our own inaudible tone included), otherwise
+/// "denied" — which is also what an unanswered permission dialog looks like; the app re-checks.
+@available(macOS 14.2, *)
+func probe() -> Never {
+    let rec = TapRecorder()
+    do { try rec.start(outPath: nil) } catch { print("denied"); exit(0) }
+    let tone = ProbeTone()
+    tone.start()
+    usleep(500_000)
+    let heard = rec.maxAbs > 0.000001
+    tone.stop()
+    rec.stop()
+    print(heard ? "granted" : "denied"); exit(0)
 }
 
 /// Creating a tap is what makes macOS show the "System Audio Recording Only" prompt; it appears
@@ -243,10 +289,12 @@ func runRecording(outPath: String) -> Never {
 // MARK: - Commands
 
 let args = CommandLine.arguments
-guard args.count >= 2 else { fail("usage: huddle-audio-tap request|mic-check|mic-request|record <out.wav>", code: 64) }
+guard args.count >= 2 else { fail("usage: huddle-audio-tap check|request|mic-check|mic-request|record <out.wav>", code: 64) }
 guard #available(macOS 14.2, *) else { fail("System audio capture needs macOS 14.2 or newer.", code: 5) }
 
 switch args[1] {
+case "check":
+    probe()
 case "request":
     requestPermission()
 case "mic-check":

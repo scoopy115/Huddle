@@ -1,8 +1,9 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "Huddle",
-  "version": "0.4.7",
+  "version": "0.4.9",
   "identifier": "com.huddle.desktop",
+  "mainBinaryName": "Huddle",
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:1420",
