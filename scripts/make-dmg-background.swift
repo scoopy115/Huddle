@@ -12,7 +12,6 @@ let outDir = a[2]
 let W = 660.0, H = 420.0
 let paper = NSColor(srgbRed: 0.976, green: 0.973, blue: 0.965, alpha: 1)     // #f9f8f6
 let ink = NSColor(srgbRed: 0.110, green: 0.098, blue: 0.094, alpha: 1)       // #1c1918
-let muted = NSColor(srgbRed: 0.110, green: 0.098, blue: 0.094, alpha: 0.55)
 let red = NSColor(srgbRed: 0.918, green: 0.239, blue: 0.239, alpha: 1)       // #ea3d3d
 let iconY = 190.0, appX = 165.0, appsX = 495.0, icon = 128.0
 
@@ -77,8 +76,7 @@ func render(scale: Double) -> NSBitmapImageRep {
         str.draw(at: .zero)
         ctx.cgContext.restoreGState()
     }
-    text("Drag Huddle into Applications", size: 17, weight: .bold, color: ink, y: 296, rounded: true)
-    text("Then open it from Launchpad or Spotlight. Your meetings never leave this Mac.", size: 12, weight: .regular, color: muted, y: 322)
+    text("Drag Huddle into Applications", size: 17, weight: .bold, color: ink, y: 304, rounded: true)
     NSGraphicsContext.restoreGraphicsState()
     return rep
 }
