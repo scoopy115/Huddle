@@ -62,8 +62,8 @@ computer.
 Requirements: a Mac with **Apple Silicon** running **macOS 14.2 or newer**. About 1 GB of disk
 for the app plus the models you choose (the recommended set is around 5 GB). At least 16 GB of RAM is recommended, but small AI models will probably also work on 8 GB of RAM.
 
-1. Download `Huddle-<version>-macos-arm64.zip` from the latest [release](../../releases/latest),
-   unzip it and drag `Huddle.app` into Applications.
+1. Download `Huddle-<version>-macos-arm64.dmg` from the latest [release](../../releases/latest),
+   open it and drag Huddle into the Applications folder.
 2. Open it. On first launch Huddle asks for the microphone and, if you want the other side of
    calls, system audio. It then checks what is already on your Mac and offers the model
    downloads it needs.

@@ -1,11 +1,10 @@
 //! Update check and download. The check asks the GitHub API for the latest release of the
 //! Huddle repository and compares its tag with the running version. "Download" fetches the
-//! release's `.zip` (which contains `Huddle.app`), unpacks it with `ditto` (keeps symlinks and
-//! signatures) into `~/Downloads/Huddle <version>/` and reveals it in Finder; the user drags it
-//! into Applications themselves. (Replacing the running bundle in place was tried and dropped:
-//! translocated or read-only locations made it fail in ways users could not act on.) A missing
-//! repository or release (404) simply means "no update" so the check is safe before the first
-//! release exists. The download is written by Huddle itself, so it carries no quarantine flag.
+//! release's `.dmg` into `~/Downloads/` and opens it: Finder mounts the image and shows the
+//! drag-to-Applications window (scripts/make-dmg.sh), so updating is the same gesture as the
+//! first install. (Replacing the running bundle in place was tried and dropped: translocated or
+//! read-only locations made it fail in ways users could not act on.) A missing repository or
+//! release (404) simply means "no update" so the check is safe before the first release exists.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -72,10 +71,11 @@ fn parse_version(tag: &str) -> Option<semver::Version> {
     semver::Version::parse(tag.trim().trim_start_matches(['v', 'V'])).ok()
 }
 
-/// The macOS zip among the release assets: a `.zip` whose name hints at macOS/Apple Silicon,
-/// otherwise the only/first `.zip`.
+/// The macOS disk image among the release assets: a `.dmg` whose name hints at macOS/Apple
+/// Silicon, otherwise the only/first `.dmg`. (Releases also carry a `.zip` for the updaters of
+/// 0.5.2–0.6.1; this version ignores it.)
 fn pick_asset(assets: &[Asset]) -> Option<&Asset> {
-    let zips: Vec<&Asset> = assets.iter().filter(|a| a.name.to_lowercase().ends_with(".zip")).collect();
+    let zips: Vec<&Asset> = assets.iter().filter(|a| a.name.to_lowercase().ends_with(".dmg")).collect();
     zips.iter()
         .find(|a| {
             let n = a.name.to_lowercase();
@@ -140,10 +140,8 @@ pub struct UpdateProgress {
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct InstallOutcome {
-    /// The unpacked `Huddle.app`, ready to be dragged into Applications.
-    pub app_path: String,
-    /// The folder it sits in (`~/Downloads/Huddle <version>`).
-    pub folder: String,
+    /// The downloaded disk image (`~/Downloads/Huddle-<version>-macos-arm64.dmg`), already opened.
+    pub dmg_path: String,
 }
 
 fn emit(app: &AppHandle, phase: &str, downloaded: u64, total: Option<u64>) {
@@ -156,29 +154,6 @@ fn running_bundle() -> Option<PathBuf> {
     exe.ancestors().find(|p| p.extension().is_some_and(|e| e == "app")).map(Path::to_path_buf)
 }
 
-fn find_app(dir: &Path) -> Option<PathBuf> {
-    let is_app = |p: &Path| p.extension().is_some_and(|e| e == "app") && p.join("Contents/MacOS").is_dir();
-    let mut stack = vec![dir.to_path_buf()];
-    // Breadth-first, two levels: `Huddle.app` at the top or inside one wrapper folder.
-    for _ in 0..2 {
-        let mut next = Vec::new();
-        for d in &stack {
-            let Ok(entries) = std::fs::read_dir(d) else { continue };
-            for e in entries.flatten() {
-                let p = e.path();
-                if is_app(&p) {
-                    return Some(p);
-                }
-                if p.is_dir() {
-                    next.push(p);
-                }
-            }
-        }
-        stack = next;
-    }
-    None
-}
-
 async fn run(cmd: &str, args: &[&std::ffi::OsStr]) -> Result<(), String> {
     let out = tokio::process::Command::new(cmd).args(args).output().await.map_err(|e| format!("{cmd}: {e}"))?;
     if out.status.success() {
@@ -189,14 +164,16 @@ async fn run(cmd: &str, args: &[&std::ffi::OsStr]) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub async fn install_update(app: AppHandle, asset_url: String, version: String) -> Result<InstallOutcome, String> {
+pub async fn install_update(app: AppHandle, asset_url: String, asset_name: Option<String>, version: String) -> Result<InstallOutcome, String> {
     if !cfg!(target_os = "macos") {
         return Err("Automatic updates are only available on macOS.".into());
     }
-    let dir = crate::paths::data_dir(&app).map_err(|e| e.to_string())?.join("updates");
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    let zip = dir.join("update.zip");
+    // Straight into Downloads, named after the version so several versions never collide.
+    let downloads = app.path().download_dir().unwrap_or_else(|_| std::env::var("HOME").map(|h| PathBuf::from(h).join("Downloads")).unwrap_or_else(|_| PathBuf::from("/tmp")));
+    std::fs::create_dir_all(&downloads).map_err(|e| format!("Could not create {}: {e}", downloads.display()))?;
+    let name = asset_name.filter(|n| n.to_lowercase().ends_with(".dmg")).unwrap_or_else(|| format!("Huddle-{}-macos-arm64.dmg", version.trim_start_matches('v')));
+    let dmg = downloads.join(&name);
+    let part = downloads.join(format!("{name}.part"));
 
     // 1. Download, streaming to disk with progress.
     emit(&app, "downloading", 0, None);
@@ -208,7 +185,7 @@ pub async fn install_update(app: AppHandle, asset_url: String, version: String) 
         .error_for_status()
         .map_err(|e| format!("Download failed: {e}"))?;
     let total = resp.content_length();
-    let mut file = tokio::fs::File::create(&zip).await.map_err(|e| e.to_string())?;
+    let mut file = tokio::fs::File::create(&part).await.map_err(|e| e.to_string())?;
     let mut downloaded = 0u64;
     let mut last_emit = 0u64;
     while let Some(chunk) = resp.chunk().await.map_err(|e| format!("Download interrupted: {e}"))? {
@@ -222,28 +199,21 @@ pub async fn install_update(app: AppHandle, asset_url: String, version: String) 
     tokio::io::AsyncWriteExt::flush(&mut file).await.map_err(|e| e.to_string())?;
     drop(file);
     emit(&app, "downloading", downloaded, total);
+    let _ = std::fs::remove_file(&dmg);
+    std::fs::rename(&part, &dmg).map_err(|e| format!("Could not save the download: {e}"))?;
 
-    // 2. Unpack. `ditto` keeps symlinks, resource forks and the code signature intact.
-    emit(&app, "extracting", downloaded, total);
-    let extracted = dir.join("extracted");
-    std::fs::create_dir_all(&extracted).map_err(|e| e.to_string())?;
-    run("ditto", &["-x".as_ref(), "-k".as_ref(), zip.as_os_str(), extracted.as_os_str()]).await?;
-    let _ = std::fs::remove_file(&zip);
-    let new_app = find_app(&extracted).ok_or("The download does not contain Huddle.app.")?;
-    let _ = run("xattr", &["-dr".as_ref(), "com.apple.quarantine".as_ref(), new_app.as_os_str()]).await;
+    // 2. Open it: Finder mounts the image and shows the drag-to-Applications window. The image is
+    //    signed and notarized, so no Gatekeeper prompt stands in the way.
+    emit(&app, "opening", downloaded, total);
+    run("open", &[dmg.as_os_str()]).await?;
+    Ok(InstallOutcome { dmg_path: dmg.display().to_string() })
+}
 
-    // 3. Put it where the user expects downloads, in a folder named after the version so several
-    //    versions never collide, and show it.
-    emit(&app, "installing", downloaded, total);
-    let downloads = app.path().download_dir().unwrap_or_else(|_| std::env::var("HOME").map(|h| PathBuf::from(h).join("Downloads")).unwrap_or_else(|_| dir.clone()));
-    let folder = downloads.join(format!("Huddle {}", version.trim_start_matches('v')));
-    let _ = std::fs::remove_dir_all(&folder);
-    std::fs::create_dir_all(&folder).map_err(|e| format!("Could not create {}: {e}", folder.display()))?;
-    let dest = folder.join("Huddle.app");
-    if std::fs::rename(&new_app, &dest).is_err() {
-        run("ditto", &[new_app.as_os_str(), dest.as_os_str()]).await?;
+/// Re-open a downloaded disk image (the dialog's "Open again" after the user closed the window).
+#[tauri::command]
+pub async fn open_download(path: String) -> Result<(), String> {
+    if !path.to_lowercase().ends_with(".dmg") {
+        return Err("Not a disk image.".into());
     }
-    let _ = std::fs::remove_dir_all(&dir);
-    let _ = std::process::Command::new("open").arg("-R").arg(&dest).status();
-    Ok(InstallOutcome { app_path: dest.display().to_string(), folder: folder.display().to_string() })
+    run("open", &[std::ffi::OsStr::new(&path)]).await
 }

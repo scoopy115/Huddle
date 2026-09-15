@@ -16,8 +16,8 @@ export interface UpdateState {
   prompt: boolean;
   installing: UpdateProgress | null;
   installError: string | null;
-  /** The unpacked new version, once downloaded. */
-  unpacked: { appPath: string; folder: string } | null;
+  /** The downloaded disk image, once it has been opened. */
+  unpacked: { dmgPath: string } | null;
 }
 
 let state: UpdateState = { checking: false, checkedAt: null, currentVersion: null, available: null, error: null, prompt: false, installing: null, installError: null, unpacked: null };
@@ -63,7 +63,7 @@ export async function installUpdate() {
   set({ installing: { phase: "downloading", downloaded: 0, total: u.assetSize ?? null }, installError: null, unpacked: null });
   const un = await native.onUpdateProgress((p) => set({ installing: p }));
   try {
-    const out = await native.installUpdate(u.assetUrl, u.version);
+    const out = await native.installUpdate(u.assetUrl, u.assetName ?? null, u.version);
     set({ installing: null, unpacked: out });
   } catch (e) {
     set({ installing: null, installError: String(e instanceof Error ? e.message : e) });

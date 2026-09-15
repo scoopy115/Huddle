@@ -33,5 +33,8 @@ if [ -n "${HUDDLE_NOTARY_PROFILE:-}" ]; then
   spctl --assess --type execute -v "$APP"
 fi
 
+# The disk image is what new users download and what the in-app updater (0.6.2+) opens.
+"$ROOT/scripts/make-dmg.sh"
+# The zip stays for the updaters of 0.5.2–0.6.1, which look for a .zip; drop it once those are gone.
 ditto -c -k --keepParent --norsrc --noextattr --noqtn "$APP" "$OUT"
-echo "Release asset: $OUT ($(du -h "$OUT" | cut -f1)) — tag the release v$VERSION"
+echo "Release assets: $BUNDLE_DIR/Huddle-$VERSION-macos-arm64.dmg + $OUT ($(du -h "$OUT" | cut -f1)) — tag the release v$VERSION"

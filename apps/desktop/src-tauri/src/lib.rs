@@ -157,6 +157,7 @@ pub fn run() {
             tray::tray_set_busy,
             updates::check_for_updates,
             updates::install_update,
+            updates::open_download,
             engine::engine_status,
             engine::engine_fetch,
             engine::engine_restart,

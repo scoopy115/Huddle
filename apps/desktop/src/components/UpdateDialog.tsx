@@ -4,7 +4,7 @@ import { fmtBytes } from "@/lib/format";
 import { dismissUpdate, installUpdate, useUpdates } from "@/lib/updates";
 import { Button, Dialog, Spinner } from "@/components/ui";
 
-const PHASES: Record<string, string> = { downloading: "Downloading", extracting: "Unpacking", installing: "Moving to Downloads" };
+const PHASES: Record<string, string> = { downloading: "Downloading", opening: "Opening" };
 
 /** "A new version of Huddle is available" — shown over the app whenever a check finds a newer release. */
 export function UpdateDialog() {
@@ -18,11 +18,11 @@ export function UpdateDialog() {
   const done = u.unpacked;
 
   return (
-    <Dialog open={u.prompt} onClose={() => { if (!busy) dismissUpdate(); }} title={done ? `Huddle ${info.version} is in your Downloads` : "A new version of Huddle is available"}
+    <Dialog open={u.prompt} onClose={() => { if (!busy) dismissUpdate(); }} title={done ? `Huddle ${info.version} is ready to install` : "A new version of Huddle is available"}
       footer={busy ? null : done ? (
         <>
           <Button variant="ghost" onClick={dismissUpdate}>Done</Button>
-          <Button variant="primary" onClick={() => native.revealInFinder(done.appPath)}>Show in Finder</Button>
+          <Button variant="primary" onClick={() => native.openDownload(done.dmgPath)}>Open again</Button>
         </>
       ) : (
         <>
@@ -36,12 +36,12 @@ export function UpdateDialog() {
       )}>
       {done ? (
         <p className="text-muted">
-          The new version was unpacked to <span className="font-mono text-[12px] text-fg/80">{done.folder}</span>. Quit Huddle, then drag the new Huddle.app into your Applications folder, replacing the old one.
+          A window with the new version has opened. Quit Huddle, then drag Huddle into the Applications folder there, replacing the old one, and open it again. The disk image is in your Downloads folder as <span className="font-mono text-[12px] text-fg/80">{done.dmgPath.split("/").pop()}</span>.
         </p>
       ) : (
         <p className="text-muted">
           Huddle {info.version} is ready to download{u.currentVersion ? `; you have ${u.currentVersion}` : ""}.
-          {info.assetSize ? ` The download is ${fmtBytes(info.assetSize)}.` : ""} It is unpacked into your Downloads folder; you then move it to Applications yourself.
+          {info.assetSize ? ` The download is ${fmtBytes(info.assetSize)}.` : ""} It opens as a disk image; you then drag Huddle into Applications yourself, like the first time.
         </p>
       )}
       {notes && !busy && !done && !u.installError && (

@@ -132,7 +132,8 @@ const desktop = {
   copyFile: (src: string, dst: string) => invoke<number>("copy_file", { src, dst }),
   appInfo: () => invoke<AppInfo>("app_info"),
   checkForUpdates: () => invoke<UpdateCheck>("check_for_updates"),
-  installUpdate: (assetUrl: string, version: string) => invoke<InstallOutcome>("install_update", { assetUrl, version }),
+  openDownload: (path: string) => invoke<void>("open_download", { path }),
+  installUpdate: (assetUrl: string, assetName: string | null, version: string) => invoke<InstallOutcome>("install_update", { assetUrl, assetName, version }),
   onUpdateProgress: (cb: (p: UpdateProgress) => void): Promise<UnlistenFn> => listen<UpdateProgress>("update:progress", (ev) => cb(ev.payload)),
   onRecordingStarted: (cb: (m: RecordingMeta) => void): Promise<UnlistenFn> => listen<RecordingMeta>("recording:started", (ev) => cb(ev.payload)),
   onRecordingStopped: (cb: (m: RecordingMeta) => void): Promise<UnlistenFn> => listen<RecordingMeta>("recording:stopped", (ev) => cb(ev.payload)),
@@ -164,6 +165,7 @@ export interface AppInfo { version: string; build: string; bundlePath: string | 
 export interface UpdateInfo { version: string; notes: string; pageUrl: string; assetUrl: string | null; assetName: string | null; assetSize: number | null }
 export interface UpdateCheck { currentVersion: string; update: UpdateInfo | null }
 export interface UpdateProgress { phase: string; downloaded: number; total: number | null }
-export interface InstallOutcome { appPath: string; folder: string }
+/** The downloaded, already opened disk image. */
+export interface InstallOutcome { dmgPath: string }
 
 export const native = desktop;
