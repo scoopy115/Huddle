@@ -35,7 +35,9 @@ computer.
 * **Action items:** extracted on demand and tracked across meetings until you tick them off.
 * **Refine:** tell Huddle what it got wrong  and it
   rewrites the notes.
-* **Ask:** ask one meeting or all of them a question.
+* **Ask:** ask one meeting, one project or all of them a question.
+* **Projects:** folders for the meetings of one client, product or team. Huddle suggests the
+  project a new meeting belongs to; you confirm with one click.
 
 ### 🔒 Private by design
 * **Everything runs locally:** transcription, speaker separation and summaries all run on your
@@ -46,7 +48,8 @@ computer.
 
 ### 🤖 Works with your AI tools
 * **MCP server:** Claude Desktop, Claude Code, Cursor and other MCP clients can search your
-  meetings, read transcripts and pull open action items, without touching your filesystem.
+  meetings, read transcripts, pull open action items and reference whole projects, without
+  touching your filesystem.
   Settings → MCP shows the ready-made configuration for each client.
 * **Network access (optional):** share the MCP server on your local network with API keys.
 * **Bring your own models:** Huddle finds models you already have (Ollama, LM Studio, Hugging

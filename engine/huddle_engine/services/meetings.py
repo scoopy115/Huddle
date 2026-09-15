@@ -57,6 +57,12 @@ def _row_meeting(r, extras: dict | None = None) -> Meeting:
                    speaker_count_hint=r["speaker_count_hint"] if "speaker_count_hint" in keys else None,
                    context_html=r["context_html"] if "context_html" in keys else None,
                    status=r["status"], source=r["source"], notes=r["notes"],
+                   project_id=r["project_id"] if "project_id" in keys else None,
+                   project_name=e.get("project_name"),
+                   suggested_project_id=r["suggested_project_id"] if "suggested_project_id" in keys else None,
+                   suggested_project_name=e.get("suggested_project_name"),
+                   suggested_project_confidence=r["suggested_project_confidence"] if "suggested_project_confidence" in keys else None,
+                   suggested_project_reason=r["suggested_project_reason"] if "suggested_project_reason" in keys else None,
                    job_state=e.get("job_state"), job_stage=e.get("job_stage"), job_progress=e.get("job_progress"),
                    job_error=e.get("job_error"),
                    speaker_count=e.get("speakers", 0), segment_count=e.get("segments", 0),
@@ -132,15 +138,30 @@ def _extras(db: Database, ids: list[str]) -> dict[str, dict]:
                       f" LEFT JOIN speakers sp ON sp.id = ms.speaker_id WHERE ms.meeting_id IN ({q})"
                       f" AND COALESCE(ms.display_name, sp.name) IS NOT NULL ORDER BY ms.id", ids):
         out[r["meeting_id"]].setdefault("participants", []).append(r["name"])
+    for r in db.query(f"SELECT m.id, p.name AS project_name, sp.name AS suggested_name FROM meetings m"
+                      f" LEFT JOIN projects p ON p.id = m.project_id LEFT JOIN projects sp ON sp.id = m.suggested_project_id"
+                      f" WHERE m.id IN ({q}) AND (p.id IS NOT NULL OR sp.id IS NOT NULL)", ids):
+        out[r["id"]]["project_name"] = r["project_name"]
+        out[r["id"]]["suggested_project_name"] = r["suggested_name"]
     return out
 
 
-def list_meetings(db: Database, limit: int = 500, query: str | None = None) -> list[Meeting]:
+def list_meetings(db: Database, limit: int = 500, query: str | None = None, project_id: str | None = None,
+                  suggested_project_id: str | None = None, unassigned: bool = False) -> list[Meeting]:
+    conds, args = [], []
     if query:
-        rows = db.query("SELECT * FROM meetings WHERE title LIKE ? ORDER BY started_at DESC LIMIT ?",
-                        (f"%{query}%", limit))
-    else:
-        rows = db.query("SELECT * FROM meetings ORDER BY started_at DESC LIMIT ?", (limit,))
+        conds.append("title LIKE ?")
+        args.append(f"%{query}%")
+    if project_id:
+        conds.append("project_id = ?")
+        args.append(project_id)
+    if suggested_project_id:
+        conds.append("suggested_project_id = ? AND project_id IS NULL")
+        args.append(suggested_project_id)
+    if unassigned:
+        conds.append("project_id IS NULL")
+    where = f" WHERE {' AND '.join(conds)}" if conds else ""
+    rows = db.query(f"SELECT * FROM meetings{where} ORDER BY started_at DESC LIMIT ?", (*args, limit))
     ex = _extras(db, [r["id"] for r in rows])
     return [_row_meeting(r, ex.get(r["id"])) for r in rows]
 
@@ -203,7 +224,10 @@ def get_detail(db: Database, meeting_id: str) -> MeetingDetail | None:
 
 def update_meeting(db: Database, meeting_id: str, title: str | None = None, notes: str | None = None,
                    language_override: str | None = None, speaker_count_hint: int | None = None,
-                   context_html: str | None = None) -> Meeting | None:
+                   context_html: str | None = None, project_id: str | None = None) -> Meeting | None:
+    if project_id is not None:
+        from . import projects
+        projects.assign(db, meeting_id, project_id.strip() or None)
     sets, args = [], []
     if context_html is not None:
         sets.append("context_html = ?")

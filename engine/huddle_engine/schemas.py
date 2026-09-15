@@ -159,6 +159,13 @@ class Meeting(Schema):
     status: MeetingStatus
     source: str
     notes: str | None = None
+    # project (folder) membership and Huddle's suggestion for it
+    project_id: str | None = None
+    project_name: str | None = None
+    suggested_project_id: str | None = None
+    suggested_project_name: str | None = None
+    suggested_project_confidence: float | None = None
+    suggested_project_reason: str | None = None
     # processing state for the list view
     job_state: str | None = None
     job_stage: str | None = None
@@ -170,6 +177,36 @@ class Meeting(Schema):
     open_action_count: int = 0
     summary_preview: str | None = None
     participants: list[str] = Field(default_factory=list)
+
+
+class Project(Schema):
+    id: str
+    name: str
+    description: str | None = None
+    color_index: int = 0
+    created_at: float
+    updated_at: float
+    meeting_count: int = 0
+    open_action_count: int = 0
+    last_meeting_at: float | None = None
+    suggestion_count: int = 0           # meetings Huddle thinks belong here but nobody confirmed yet
+
+
+class ProjectDetail(Schema):
+    project: Project
+    meetings: list[Meeting]
+    suggested: list[Meeting]
+
+
+class CreateProjectRequest(Schema):
+    name: str
+    description: str | None = None
+    meeting_ids: list[str] = Field(default_factory=list)
+
+
+class UpdateProjectRequest(Schema):
+    name: str | None = None
+    description: str | None = None      # "" clears
 
 
 class MeetingDetail(Schema):
@@ -216,6 +253,7 @@ class UpdateMeetingRequest(Schema):
     notes: str | None = None
     language_override: str | None = None    # "" clears
     speaker_count_hint: int | None = None   # 0 clears
+    project_id: str | None = None           # "" clears (also dismisses a pending suggestion)
 
 
 class RenameSpeakerRequest(Schema):
@@ -248,6 +286,7 @@ class CreateActionItemRequest(Schema):
 
 class AskRequest(Schema):
     question: str
+    project_id: str | None = None           # limit "ask all" to one project
 
 
 class SearchHit(Schema):

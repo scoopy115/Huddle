@@ -259,6 +259,25 @@ MIGRATIONS.append((6, """
     ALTER TABLE meetings ADD COLUMN context_html TEXT;
     """))
 
+MIGRATIONS.append((7, """
+    -- Projects: folders of meetings. A meeting belongs to at most one project; Huddle may
+    -- suggest one after summarising (suggested_* is cleared when the user decides).
+    CREATE TABLE projects (
+        id           TEXT PRIMARY KEY,
+        name         TEXT NOT NULL,
+        description  TEXT,
+        color_index  INTEGER NOT NULL DEFAULT 0,
+        created_at   REAL NOT NULL,
+        updated_at   REAL NOT NULL
+    );
+    CREATE UNIQUE INDEX idx_projects_name ON projects(LOWER(name));
+    ALTER TABLE meetings ADD COLUMN project_id TEXT REFERENCES projects(id) ON DELETE SET NULL;
+    ALTER TABLE meetings ADD COLUMN suggested_project_id TEXT REFERENCES projects(id) ON DELETE SET NULL;
+    ALTER TABLE meetings ADD COLUMN suggested_project_confidence REAL;
+    ALTER TABLE meetings ADD COLUMN suggested_project_reason TEXT;
+    CREATE INDEX idx_meetings_project ON meetings(project_id);
+    """))
+
 LATEST_VERSION = MIGRATIONS[-1][0]
 
 

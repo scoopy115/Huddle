@@ -53,9 +53,10 @@ fn build_menu(app: &tauri::App) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> 
     let edit = SubmenuBuilder::new(app, "Edit").undo().redo().separator().cut().copy().paste().select_all().build()?;
     let view = SubmenuBuilder::new(app, "View")
         .item(&MenuItemBuilder::with_id("view-meetings", "Meetings").accelerator("CmdOrCtrl+1").build(app)?)
-        .item(&MenuItemBuilder::with_id("view-ask", "Ask").accelerator("CmdOrCtrl+2").build(app)?)
-        .item(&MenuItemBuilder::with_id("view-actions", "Action Items").accelerator("CmdOrCtrl+3").build(app)?)
-        .item(&MenuItemBuilder::with_id("view-processes", "Processes").accelerator("CmdOrCtrl+4").build(app)?)
+        .item(&MenuItemBuilder::with_id("view-projects", "Projects").accelerator("CmdOrCtrl+2").build(app)?)
+        .item(&MenuItemBuilder::with_id("view-ask", "Ask").accelerator("CmdOrCtrl+3").build(app)?)
+        .item(&MenuItemBuilder::with_id("view-actions", "Action Items").accelerator("CmdOrCtrl+4").build(app)?)
+        .item(&MenuItemBuilder::with_id("view-processes", "Processes").accelerator("CmdOrCtrl+5").build(app)?)
         .separator()
         .item(&MenuItemBuilder::with_id("view-search", "Search").accelerator("CmdOrCtrl+K").build(app)?)
         .separator()
@@ -180,6 +181,18 @@ pub fn run() {
             tauri::RunEvent::ExitRequested { code: None, api, .. } if shell_prefs::load(app).menu_bar => {
                 api.prevent_exit();
                 tray::hide_to_menu_bar(app);
+            }
+            // Launching Huddle again from Spotlight, the Dock or Launchpad while it sits in the
+            // menu bar reaches the running instance as a "reopen" (no window is visible in the
+            // Accessory state). Without handling it, only the second launch showed the window,
+            // because the first one merely activated the process.
+            #[cfg(target_os = "macos")]
+            tauri::RunEvent::Reopen { has_visible_windows, .. } => {
+                let main_hidden = app.get_webview_window("main").map(|w| !w.is_visible().unwrap_or(false)).unwrap_or(true);
+                if !has_visible_windows || main_hidden {
+                    tray::hide_popover(app);
+                    tray::show_main_window(app);
+                }
             }
             tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit => {
                 // Finish an in-progress recording so it can be recovered, and kill the engine on

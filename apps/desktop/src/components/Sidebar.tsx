@@ -1,4 +1,4 @@
-import { Activity, ArrowUpCircle, CheckSquare, MessageSquareText, Mic, Search, Settings, type LucideIcon } from "lucide-react";
+import { Activity, ArrowUpCircle, CheckSquare, Folder, MessageSquareText, Mic, Search, Settings, type LucideIcon } from "lucide-react";
 import { cn, modKey } from "@/lib/utils";
 import { sounds } from "@/lib/sounds";
 import { showUpdatePrompt, useUpdates } from "@/lib/updates";
@@ -43,7 +43,7 @@ function NavItem({ icon: Icon, label, active, onClick, count, hint, disabled, ti
 
 export function Sidebar({ engine, openActions, recording, running }: { engine: EngineStatus; openActions: number; recording: boolean; running: number }) {
   const { view, go, ai } = useNav();
-  const is = (k: View["kind"]) => view.kind === k || (k === "meetings" && view.kind === "meeting");
+  const is = (k: View["kind"]) => view.kind === k || (k === "meetings" && view.kind === "meeting") || (k === "projects" && view.kind === "project");
   const offline = engine.state === "failed" || engine.state === "stopped";
 
   return (
@@ -56,9 +56,10 @@ export function Sidebar({ engine, openActions, recording, running }: { engine: E
       </div>
       <nav className="relative flex flex-col gap-0.5 px-3">
         <NavItem icon={Mic} label="Meetings" active={is("meetings")} onClick={() => go({ kind: "meetings" })} hint={`${modKey}1`} />
-        <NavItem icon={MessageSquareText} label="Ask" active={is("ask")} onClick={() => go({ kind: "ask" })} hint={`${modKey}2`} disabled={!ai.ready} title={ai.ready ? undefined : AI_MISSING_HINT} />
-        <NavItem icon={CheckSquare} label="Action Items" active={is("actions")} onClick={() => go({ kind: "actions" })} count={openActions} hint={`${modKey}3`} />
-        <NavItem icon={Activity} label="Processes" active={is("processes")} onClick={() => go({ kind: "processes" })} count={running} hint={`${modKey}4`} />
+        <NavItem icon={Folder} label="Projects" active={is("projects")} onClick={() => go({ kind: "projects" })} hint={`${modKey}2`} />
+        <NavItem icon={MessageSquareText} label="Ask" active={is("ask")} onClick={() => go({ kind: "ask" })} hint={`${modKey}3`} disabled={!ai.ready} title={ai.ready ? undefined : AI_MISSING_HINT} />
+        <NavItem icon={CheckSquare} label="Action Items" active={is("actions")} onClick={() => go({ kind: "actions" })} count={openActions} hint={`${modKey}4`} />
+        <NavItem icon={Activity} label="Processes" active={is("processes")} onClick={() => go({ kind: "processes" })} count={running} hint={`${modKey}5`} />
         <NavItem icon={Search} label="Search" active={is("search")} onClick={() => go({ kind: "search" })} hint={`${modKey}K`} />
         <NavItem icon={Settings} label="Settings" active={is("settings")} onClick={() => go({ kind: "settings" })} hint={`${modKey},`} />
       </nav>

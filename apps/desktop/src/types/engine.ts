@@ -35,6 +35,12 @@ export interface Meeting {
   status: MeetingStatus;
   source: string;
   notes: string | null;
+  projectId: string | null;
+  projectName: string | null;
+  suggestedProjectId: string | null;
+  suggestedProjectName: string | null;
+  suggestedProjectConfidence: number | null;
+  suggestedProjectReason: string | null;
   jobState: "queued" | "running" | "ready" | "failed" | null;
   jobStage: string | null;
   jobProgress: number | null;
@@ -44,6 +50,27 @@ export interface Meeting {
   openActionCount: number;
   summaryPreview: string | null;
   participants: string[];
+}
+
+/** A folder of meetings. */
+export interface Project {
+  id: string;
+  name: string;
+  description: string | null;
+  colorIndex: number;
+  createdAt: number;
+  updatedAt: number;
+  meetingCount: number;
+  openActionCount: number;
+  lastMeetingAt: number | null;
+  suggestionCount: number;
+}
+
+export interface ProjectDetail {
+  project: Project;
+  meetings: Meeting[];
+  /** Meetings Huddle thinks belong here; waiting for Add / Not this one. */
+  suggested: Meeting[];
 }
 
 export interface Recording {

@@ -42,24 +42,24 @@ def _terms(question: str) -> list[str]:
     return [t for t in tokenize(question) if len(t) > 3][:8]
 
 
-def _hits(db: Database, question: str, meeting_id: str | None, limit: int) -> list[SearchHit]:
-    hits = search_svc.search(db, question, limit=limit, meeting_id=meeting_id)
+def _hits(db: Database, question: str, meeting_id: str | None, limit: int, project_id: str | None = None) -> list[SearchHit]:
+    hits = search_svc.search(db, question, limit=limit, meeting_id=meeting_id, project_id=project_id)
     if not hits:
         terms = _terms(question)
         if terms:
-            hits = search_svc.search(db, " ".join(terms), limit=limit, meeting_id=meeting_id)
+            hits = search_svc.search(db, " ".join(terms), limit=limit, meeting_id=meeting_id, project_id=project_id)
     return hits
 
 
-def _notes_context(db: Database, question: str, meeting_id: str | None) -> list[str]:
+def _notes_context(db: Database, question: str, meeting_id: str | None, project_id: str | None = None) -> list[str]:
     """Decisions and action items relevant to the question (LIKE match on salient terms;
     all open items when the question is about tasks)."""
     terms = _terms(question)
     out: list[str] = []
     want_tasks = bool(_TASK_WORDS.search(question))
     want_decisions = bool(_DECISION_WORDS.search(question))
-    scope = "AND a.meeting_id = ?" if meeting_id else ""
-    args_scope = [meeting_id] if meeting_id else []
+    scope = "AND a.meeting_id = ?" if meeting_id else "AND m.project_id = ?" if project_id else ""
+    args_scope = [meeting_id] if meeting_id else [project_id] if project_id else []
 
     conds = " OR ".join(["LOWER(a.text) LIKE ?", "LOWER(a.owner) LIKE ?"] * max(1, len(terms))) if terms else "0"
     like_args = [f"%{t}%" for t in terms for _ in (0, 1)]
@@ -74,19 +74,21 @@ def _notes_context(db: Database, question: str, meeting_id: str | None) -> list[
 
     dconds = " OR ".join(["LOWER(d.text) LIKE ?"] * max(1, len(terms))) if terms else "0"
     drows = db.query(f"SELECT d.*, m.title, m.started_at FROM decisions d JOIN meetings m ON m.id = d.meeting_id"
-                     f" WHERE ({dconds} {'OR 1' if want_decisions and meeting_id else ''}) {scope.replace('a.', 'd.')}"
+                     f" WHERE ({dconds} {'OR 1' if want_decisions and meeting_id else ''}) {scope.replace('a.meeting_id', 'd.meeting_id')}"
                      f" ORDER BY m.started_at DESC LIMIT 30", [f"%{t}%" for t in terms] + args_scope)
     for r in drows:
         out.append(f"[{r['title']} · {_date(r['started_at'])} · decision · {_fmt(r['evidence_start'] or 0)}] {r['text']}")
     return out
 
 
-def ask(db: Database, provider, question: str, meeting_id: str | None = None, limit: int = 24, language: str = "English") -> dict:
-    hits = _hits(db, question, meeting_id, limit)
-    notes = _notes_context(db, question, meeting_id)
+def ask(db: Database, provider, question: str, meeting_id: str | None = None, limit: int = 24, language: str = "English",
+        project_id: str | None = None) -> dict:
+    hits = _hits(db, question, meeting_id, limit, project_id=project_id)
+    notes = _notes_context(db, question, meeting_id, project_id=project_id)
     sources = [h.model_dump(by_alias=True) for h in hits[:12]]
     if not hits and not notes:
-        return {"answer": "I couldn't find anything about that in " + ("this meeting." if meeting_id else "your meetings."),
+        where = "this meeting." if meeting_id else "this project's meetings." if project_id else "your meetings."
+        return {"answer": "I couldn't find anything about that in " + where,
                 "sources": []}
     if isinstance(provider, ExtractiveProvider):
         lines = [f"[{h.meeting_title} · {h.speaker_name or 'Speaker'} · {_fmt(h.start)}] {h.text}" for h in hits[:8]] + notes[:8]

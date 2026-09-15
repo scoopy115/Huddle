@@ -14,12 +14,16 @@ def _row(r) -> ActionItem:
                       meeting_started_at=r["meeting_started_at"] if "meeting_started_at" in r.keys() else None)  # noqa: SIM118 (sqlite3.Row)
 
 
-def list_all(db: Database, open_only: bool = False, owner: str | None = None, limit: int = 500) -> list[ActionItem]:
+def list_all(db: Database, open_only: bool = False, owner: str | None = None, limit: int = 500,
+             project_id: str | None = None) -> list[ActionItem]:
     q = ("SELECT a.*, m.title AS meeting_title, m.started_at AS meeting_started_at FROM action_items a"
          " JOIN meetings m ON m.id = a.meeting_id")
     conds, args = [], []
     if open_only:
         conds.append("a.done = 0")
+    if project_id:
+        conds.append("m.project_id = ?")
+        args.append(project_id)
     if owner:
         conds.append("LOWER(a.owner) = LOWER(?)")
         args.append(owner)

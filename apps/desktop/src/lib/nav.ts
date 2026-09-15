@@ -3,6 +3,8 @@ import { createContext, useContext } from "react";
 export type View =
   | { kind: "meetings" }
   | { kind: "meeting"; id: string; seek?: number; segmentId?: number; nonce?: number }
+  | { kind: "projects" }
+  | { kind: "project"; id: string }
   | { kind: "record" }
   | { kind: "search"; query?: string; nonce?: number }
   | { kind: "ask" }

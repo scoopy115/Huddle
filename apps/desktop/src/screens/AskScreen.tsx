@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { MessageSquareText, Send } from "lucide-react";
 import { api, errorMessage } from "@/lib/api";
-import type { Meeting, SearchHit } from "@/types/engine";
+import type { Meeting, Project, SearchHit } from "@/types/engine";
 import { fmtTime } from "@/lib/format";
 import { AI_MISSING_HINT, useNav } from "@/lib/nav";
-import { Button, Input, Spinner } from "@/components/ui";
+import { Button, Input, Select, Spinner } from "@/components/ui";
 
 interface Turn { role: "user" | "assistant"; text: string; sources?: SearchHit[]; error?: boolean }
 
@@ -27,7 +27,12 @@ export function AskScreen({ meetings }: { meetings: Meeting[] }) {
   const [q, setQ] = useState("");
   const [busy, setBusy] = useState(false);
   const bottom = useRef<HTMLDivElement>(null);
-  const suggestions = useMemo(() => suggestionsFor(meetings), [meetings]);
+  // Scope: every meeting, or only the meetings of one project.
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [scope, setScope] = useState("");
+  useEffect(() => { api.projects().then(setProjects).catch(() => {}); }, []);
+  const scoped = useMemo(() => (scope ? meetings.filter((m) => m.projectId === scope) : meetings), [meetings, scope]);
+  const suggestions = useMemo(() => suggestionsFor(scoped), [scoped]);
 
   useEffect(() => { bottom.current?.scrollIntoView({ behavior: "smooth" }); }, [turns, busy]);
 
@@ -38,7 +43,7 @@ export function AskScreen({ meetings }: { meetings: Meeting[] }) {
     setTurns((t) => [...t, { role: "user", text }]);
     setBusy(true);
     try {
-      const res = await api.askAll(text);
+      const res = await api.askAll(text, scope || null);
       setTurns((t) => [...t, { role: "assistant", text: res.answer, sources: res.sources, error: !!res.error }]);
     } catch (e) {
       setTurns((t) => [...t, { role: "assistant", text: errorMessage(e), error: true }]);
@@ -69,6 +74,12 @@ export function AskScreen({ meetings }: { meetings: Meeting[] }) {
       <header data-tauri-drag-region className="titlebar-drag flex h-[52px] shrink-0 items-center gap-3 border-b border-border px-5">
         <h1 data-tauri-drag-region className="page-title">Ask</h1>
         <div data-tauri-drag-region className="flex-1" />
+        {projects.length > 0 && (
+          <Select className="w-[200px]" value={scope} onChange={(e) => setScope(e.target.value)} title="Which meetings to answer from">
+            <option value="">All meetings</option>
+            {projects.map((p) => <option key={p.id} value={p.id}>Project: {p.name}</option>)}
+          </Select>
+        )}
         {turns.length > 0 && <Button variant="ghost" size="sm" onClick={() => setTurns([])}>Clear</Button>}
       </header>
 
@@ -118,7 +129,7 @@ export function AskScreen({ meetings }: { meetings: Meeting[] }) {
 
       <div className="border-t border-border bg-surface/60 px-6 py-3">
         <div className="mx-auto flex max-w-[760px] gap-2">
-          <Input autoFocus className="h-10 text-[14px]" placeholder="Ask about any meeting or action item…" value={q}
+          <Input autoFocus className="h-10 text-[14px]" placeholder={scope ? `Ask about the meetings of ${projects.find((p) => p.id === scope)?.name ?? "this project"}…` : "Ask about any meeting or action item…"} value={q}
             onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.key === "Enter" && ask(q)} disabled={busy} />
           <Button variant="primary" className="h-10" loading={busy} onClick={() => ask(q)}><Send className="h-4 w-4" /></Button>
         </div>

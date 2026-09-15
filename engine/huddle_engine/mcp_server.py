@@ -19,6 +19,7 @@ except ImportError:  # mcp 1.x
 from .context import EngineContext
 from .services import action_items as ai_svc
 from .services import meetings as ms
+from .services import projects as projects_svc
 from .services import search as search_svc
 from .services import transcripts
 from .settings import EngineConfig
@@ -39,20 +40,61 @@ def _date(ts: float | None) -> str | None:
 def build_server(cfg: EngineConfig | None = None) -> FastMCP:
     ctx = EngineContext(cfg, start_jobs=False)
     mcp = FastMCP("Huddle", instructions=(
-        "Local, private meeting memory. Use search_transcripts/search_meetings to find relevant moments, then "
-        "get_transcript_context for surrounding lines. Every hit carries meetingId, segmentId and timestamps so "
-        "answers can cite evidence. Avoid fetching whole transcripts unless the user asks for one."))
+        "Local, private meeting memory. Meetings can be filed in projects (folders): list_projects, then "
+        "get_project for everything about one project (its meetings, decisions, open action items), or pass "
+        "project_id to list_meetings / search_transcripts / search_meetings / get_open_action_items to stay inside "
+        "it. Use search_transcripts/search_meetings to find relevant moments, then get_transcript_context for "
+        "surrounding lines. Every hit carries meetingId, segmentId and timestamps so answers can cite evidence. "
+        "Avoid fetching whole transcripts unless the user asks for one."))
 
     def _meeting_brief(m) -> dict[str, Any]:
         return {"meetingId": m.id, "title": m.title, "date": _date(m.started_at),
                 "durationMin": round((m.duration_sec or 0) / 60, 1), "status": m.status, "language": m.language,
                 "participants": m.participants, "openActionItems": m.open_action_count,
-                "summaryPreview": m.summary_preview}
+                "summaryPreview": m.summary_preview,
+                "projectId": m.project_id, "projectName": m.project_name}
+
+    def _project_brief(p) -> dict[str, Any]:
+        return {"projectId": p.id, "name": p.name, "description": p.description, "meetingCount": p.meeting_count,
+                "openActionItems": p.open_action_count, "lastMeeting": _date(p.last_meeting_at)}
 
     @mcp.tool()
-    def list_meetings(limit: int = 30, query: str | None = None) -> list[dict]:
-        """List recent meetings (newest first). Optional title filter."""
-        return [_meeting_brief(m) for m in ms.list_meetings(ctx.db, limit=limit, query=query)]
+    def list_meetings(limit: int = 30, query: str | None = None, project_id: str | None = None) -> list[dict]:
+        """List recent meetings (newest first). Optional title filter; optional project_id to list one project's meetings."""
+        return [_meeting_brief(m) for m in ms.list_meetings(ctx.db, limit=limit, query=query, project_id=project_id)]
+
+    @mcp.tool()
+    def list_projects() -> list[dict]:
+        """Projects (folders of meetings) with meeting counts and open action items."""
+        return [_project_brief(p) for p in projects_svc.list_projects(ctx.db)]
+
+    @mcp.tool()
+    def get_project(project_id: str, max_meetings: int = 50) -> dict:
+        """Everything about one project: its meetings (newest first, with summaries), every decision and
+        the open action items across them. Use search_transcripts with project_id for the details."""
+        p = projects_svc.get_project(ctx.db, project_id)
+        if not p:
+            by_name = projects_svc.find_by_name(ctx.db, project_id)
+            if not by_name:
+                return {"error": "project not found"}
+            p = by_name
+        meetings = ms.list_meetings(ctx.db, limit=max_meetings, project_id=p.id)
+        decisions = []
+        for m in meetings:
+            for x in ms.get_decisions(ctx.db, m.id):
+                decisions.append({"meetingId": m.id, "meetingTitle": m.title, "date": _date(m.started_at), "text": x.text,
+                                  "timestamp": _fmt(x.evidence_start), "segmentId": x.segment_id})
+        summaries = {r["meeting_id"]: r["summary"] for r in ctx.db.query(
+            "SELECT s.meeting_id, s.summary FROM summaries s JOIN meetings m ON m.id = s.meeting_id WHERE m.project_id = ?", (p.id,))}
+        return {
+            **_project_brief(p),
+            "meetings": [{**_meeting_brief(m), "summary": summaries.get(m.id)} for m in meetings],
+            "decisions": decisions,
+            "openActionItems": [{"id": a.id, "text": a.text, "owner": a.owner, "dueDate": a.due_date, "meetingId": a.meeting_id,
+                                 "meetingTitle": a.meeting_title, "meetingDate": _date(a.meeting_started_at),
+                                 "timestamp": _fmt(a.evidence_start), "segmentId": a.segment_id}
+                                for a in ai_svc.list_all(ctx.db, open_only=True, project_id=p.id, limit=200)],
+        }
 
     @mcp.tool()
     def get_meeting(meeting_id: str) -> dict:
@@ -97,12 +139,12 @@ def build_server(cfg: EngineConfig | None = None) -> FastMCP:
                  "segmentId": a.segment_id} for a in ms.get_action_items(ctx.db, meeting_id)]
 
     @mcp.tool()
-    def get_open_action_items(owner: str | None = None, limit: int = 100) -> list[dict]:
-        """Open (not done) action items across all meetings, optionally filtered by owner name."""
+    def get_open_action_items(owner: str | None = None, limit: int = 100, project_id: str | None = None) -> list[dict]:
+        """Open (not done) action items across all meetings (or one project), optionally filtered by owner name."""
         return [{"id": a.id, "text": a.text, "owner": a.owner, "dueDate": a.due_date, "meetingId": a.meeting_id,
                  "meetingTitle": a.meeting_title, "meetingDate": _date(a.meeting_started_at),
                  "timestamp": _fmt(a.evidence_start), "segmentId": a.segment_id}
-                for a in ai_svc.list_all(ctx.db, open_only=True, owner=owner, limit=limit)]
+                for a in ai_svc.list_all(ctx.db, open_only=True, owner=owner, limit=limit, project_id=project_id)]
 
     @mcp.tool()
     def get_transcript(meeting_id: str, start_sec: float | None = None, end_sec: float | None = None,
@@ -124,17 +166,18 @@ def build_server(cfg: EngineConfig | None = None) -> FastMCP:
                 for s in transcripts.segment_window(ctx.db, segment_id, before=before, after=after)]
 
     @mcp.tool()
-    def search_transcripts(query: str, limit: int = 20, meeting_id: str | None = None) -> list[dict]:
-        """Full-text search across all transcripts (or one meeting). Returns cite-able hits."""
+    def search_transcripts(query: str, limit: int = 20, meeting_id: str | None = None,
+                           project_id: str | None = None) -> list[dict]:
+        """Full-text search across all transcripts (or one meeting / one project). Returns cite-able hits."""
         return [{"meetingId": h.meeting_id, "meetingTitle": h.meeting_title, "date": _date(h.meeting_started_at),
                  "speaker": h.speaker_name, "timestamp": _fmt(h.start), "start": h.start, "end": h.end,
                  "segmentId": h.segment_id, "text": h.text, "snippet": h.snippet}
-                for h in search_svc.search(ctx.db, query, limit=limit, meeting_id=meeting_id)]
+                for h in search_svc.search(ctx.db, query, limit=limit, meeting_id=meeting_id, project_id=project_id)]
 
     @mcp.tool()
-    def search_meetings(query: str, limit: int = 10) -> list[dict]:
-        """Meetings ranked by how much they discuss the query."""
-        out = search_svc.search_meetings(ctx.db, query, limit=limit)
+    def search_meetings(query: str, limit: int = 10, project_id: str | None = None) -> list[dict]:
+        """Meetings ranked by how much they discuss the query (optionally within one project)."""
+        out = search_svc.search_meetings(ctx.db, query, limit=limit, project_id=project_id)
         for c in out:
             c["date"] = _date(c.pop("startedAt"))
         return out

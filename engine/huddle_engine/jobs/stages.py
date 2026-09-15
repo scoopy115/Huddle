@@ -382,6 +382,17 @@ def summarizing(ctx: StageContext) -> str:
                         seg_ids[a.evidence.segment_idx] if a.evidence.segment_idx is not None else None,
                         prev_done.get(a.text.strip().lower(), 0), now) for i, a in enumerate(notes.action_items)])
     extra = f" · {inferred} speaker{'s' if inferred != 1 else ''} named from the conversation" if inferred else ""
+    # Which project does this belong to? A suggestion only; the user confirms it on the meeting.
+    ctx.check_cancelled()
+    try:
+        from ..providers.summarize import LANG_NAMES
+        from ..services import projects
+        code = resolve_notes_language(ctx.settings)
+        suggested = projects.suggest(ctx.db, ctx.meeting_id, provider, language=LANG_NAMES.get(code, code))
+        if suggested:
+            extra += f" · looks like part of “{suggested.name}”"
+    except Exception:
+        log.exception("project suggestion failed")
     if notes.provider == "extractive":
         return "Built-in notes (no AI model in Ollama)" + extra
     return f"{res.model.name if res.model else notes.model}{extra}" + renamed

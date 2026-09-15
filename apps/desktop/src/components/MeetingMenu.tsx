@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { Download, FileAudio, Languages, RotateCw, Sparkles, Trash2 } from "lucide-react";
+import { Download, FileAudio, Folder, Languages, RotateCw, Sparkles, Trash2 } from "lucide-react";
 import { save } from "@tauri-apps/plugin-dialog";
 import { api, errorMessage } from "@/lib/api";
 import { native } from "@/lib/native";
@@ -7,6 +7,7 @@ import { languageOptions } from "@/lib/languages";
 import { cn } from "@/lib/utils";
 import { AI_MISSING_HINT, useNav } from "@/lib/nav";
 import { Button, DangerDialog, Dialog, Select } from "@/components/ui";
+import { ProjectPicker } from "@/components/ProjectPicker";
 
 /** The subset of a meeting the actions need — satisfied by both the list item and the detail. */
 export interface MenuMeeting {
@@ -15,13 +16,14 @@ export interface MenuMeeting {
   language: string | null;
   languageOverride: string | null;
   speakerCountHint?: number | null;
+  projectId?: string | null;
 }
 
 /** Options for the "how many people spoke" hint: 0 = let the diarizer decide. */
 export const SPEAKER_COUNT_OPTIONS = [0, 1, 2, 3, 4, 5, 6, 7, 8];
 export const speakerCountLabel = (n: number) => (n === 0 ? "Detect automatically" : n === 1 ? "1 person" : `${n} people`);
 
-export type MeetingAction = "export-md" | "export-txt" | "export-json" | "export-srt" | "export-audio" | "language" | "summary" | "reprocess" | "delete";
+export type MeetingAction = "export-md" | "export-txt" | "export-json" | "export-srt" | "export-audio" | "project" | "language" | "summary" | "reprocess" | "delete";
 
 /**
  * Everything the "…" menu on a meeting can do — shared by the detail page and the
@@ -30,7 +32,7 @@ export type MeetingAction = "export-md" | "export-txt" | "export-json" | "export
  */
 export function useMeetingActions({ onChanged, onDeleted }: { onChanged: (m: MenuMeeting) => void; onDeleted?: (m: MenuMeeting) => void }) {
   const [target, setTarget] = useState<MenuMeeting | null>(null);
-  const [dialog, setDialog] = useState<"language" | "reprocess" | "delete" | null>(null);
+  const [dialog, setDialog] = useState<"language" | "reprocess" | "delete" | "project" | null>(null);
   const [langChoice, setLangChoice] = useState("");
   const [countChoice, setCountChoice] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -59,6 +61,9 @@ export function useMeetingActions({ onChanged, onDeleted }: { onChanged: (m: Men
           if (path) await native.copyFile(detail.audioPath, path);
           break;
         }
+        case "project":
+          setDialog("project");
+          break;
         case "language":
           setLangChoice(m.languageOverride ?? (m.language ?? "").split(",")[0] ?? "");
           setDialog("language");
@@ -89,6 +94,8 @@ export function useMeetingActions({ onChanged, onDeleted }: { onChanged: (m: Men
 
   const dialogs: ReactNode = target && (
     <>
+      <ProjectPicker open={dialog === "project"} onClose={close} currentId={target.projectId ?? null}
+        onPick={async (pid) => { await api.setMeetingProject(target.id, pid); onChanged(target); }} />
       <Dialog open={dialog === "reprocess"} onClose={close} title="Reprocess meeting"
         footer={<><Button variant="ghost" onClick={close}>Cancel</Button><Button variant="primary" onClick={async () => { close(); try { await api.process(target.id, { languageOverride: langChoice, speakerCount: countChoice }); onChanged(target); } catch (e) { setError(errorMessage(e)); } }}>Start</Button></>}>
         <p className="mb-3 text-muted">Transcript, speakers and notes are generated again. The current version stays until each step has finished, so you can cancel at any time and keep what you have.</p>
@@ -131,6 +138,7 @@ export function MeetingMenuList({ onPick }: { onPick: (a: MeetingAction) => void
       ))}
       <button className={ITEM} onClick={() => onPick("export-audio")}><FileAudio className="h-3.5 w-3.5 text-muted" /> Export audio…</button>
       <div className="my-1 border-t border-border" />
+      <button className={ITEM} onClick={() => onPick("project")}><Folder className="h-3.5 w-3.5 text-muted" /> Move to project…</button>
       <button className={ITEM} onClick={() => onPick("language")}><Languages className="h-3.5 w-3.5 text-muted" /> Change spoken language…</button>
       <button className={cn(ITEM, !ai.ready && "cursor-not-allowed opacity-45 hover:bg-transparent")} disabled={!ai.ready} title={ai.ready ? undefined : AI_MISSING_HINT} onClick={() => onPick("summary")}><Sparkles className="h-3.5 w-3.5 text-muted" /> Regenerate summary</button>
       <button className={ITEM} onClick={() => onPick("reprocess")}><RotateCw className="h-3.5 w-3.5 text-muted" /> Reprocess meeting…</button>
@@ -148,7 +156,7 @@ export function MeetingContextMenu({ position, onClose, onPick }: { position: { 
     window.addEventListener("scroll", onClose, true);
     return () => { window.removeEventListener("keydown", onKey); window.removeEventListener("scroll", onClose, true); };
   }, [onClose]);
-  const W = 220, H = 300;
+  const W = 220, H = 330;
   const x = Math.min(position.x, window.innerWidth - W - 8);
   const y = Math.min(position.y, window.innerHeight - H - 8);
   return (

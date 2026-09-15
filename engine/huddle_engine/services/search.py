@@ -37,17 +37,20 @@ _SQL = """
 """
 
 
-def search(db: Database, query: str, limit: int = 50, meeting_id: str | None = None) -> list[SearchHit]:
+def search(db: Database, query: str, limit: int = 50, meeting_id: str | None = None,
+           project_id: str | None = None) -> list[SearchHit]:
     q = query.strip()
     if not q:
         return []
-    extra = "AND s.meeting_id = ?" if meeting_id else ""
+    extra = "AND s.meeting_id = ?" if meeting_id else "AND m.project_id = ?" if project_id else ""
     sql = _SQL.format(extra=extra)
 
     def run(match: str) -> list[sqlite3.Row]:
         args: list = [match]
         if meeting_id:
             args.append(meeting_id)
+        elif project_id:
+            args.append(project_id)
         args.append(limit)
         try:
             return db.query(sql, args)
@@ -62,15 +65,17 @@ def search(db: Database, query: str, limit: int = 50, meeting_id: str | None = N
                       snippet=r["snippet"], text=r["text"]) for r in rows]
 
 
-def search_meetings(db: Database, query: str, limit: int = 20) -> list[dict]:
+def search_meetings(db: Database, query: str, limit: int = 20, project_id: str | None = None) -> list[dict]:
     """Meetings ranked by number of matching transcript segments (+ title matches)."""
-    hits = search(db, query, limit=500)
+    hits = search(db, query, limit=500, project_id=project_id)
     counts: dict[str, dict] = {}
     for h in hits:
         c = counts.setdefault(h.meeting_id, {"meetingId": h.meeting_id, "title": h.meeting_title,
                                              "startedAt": h.meeting_started_at, "matches": 0, "firstHit": h})
         c["matches"] += 1
-    for r in db.query("SELECT id, title, started_at FROM meetings WHERE title LIKE ? LIMIT ?", (f"%{query}%", limit)):
+    scope = " AND project_id = ?" if project_id else ""
+    for r in db.query(f"SELECT id, title, started_at FROM meetings WHERE title LIKE ?{scope} LIMIT ?",
+                      (f"%{query}%", *([project_id] if project_id else []), limit)):
         c = counts.setdefault(r["id"], {"meetingId": r["id"], "title": r["title"], "startedAt": r["started_at"],
                                         "matches": 0, "firstHit": None})
         c["matches"] += 3

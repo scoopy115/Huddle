@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowLeft, Calendar, CalendarClock, Check, CheckCircle2, Circle, Clock, Languages, MessageSquareText, MoreHorizontal, Pencil, Plus, Sparkles, Timer, Trash2, User, Wand2, X } from "lucide-react";
+import { ArrowLeft, Calendar, CalendarClock, Check, CheckCircle2, Circle, Clock, Folder, Languages, MessageSquareText, MoreHorizontal, Pencil, Plus, Sparkles, Timer, Trash2, User, Wand2, X } from "lucide-react";
 import { RichTextEditor } from "@/components/RichTextEditor";
 import { api, errorMessage } from "@/lib/api";
 import type { ActionItem, AskResult, MeetingDetail, MeetingSpeaker } from "@/types/engine";
@@ -10,6 +10,7 @@ import { AudioPlayer, type PlayerHandle } from "@/components/AudioPlayer";
 import { ProcessingStatus } from "@/components/ProcessingStatus";
 import { TranscriptView, speakerDisplay } from "@/components/TranscriptView";
 import { MeetingMenuList, useMeetingActions } from "@/components/MeetingMenu";
+import { ProjectPicker } from "@/components/ProjectPicker";
 import { Badge, Button, Dialog, Input, SectionTitle, Spinner } from "@/components/ui";
 
 const langLabel = (code: string | null) =>
@@ -32,6 +33,8 @@ export function MeetingScreen({ id, seek, segmentId, nonce, onChanged }: { id: s
   const [generating, setGenerating] = useState(false);
   const [refine, setRefine] = useState(false);
   const [contextHtml, setContextHtml] = useState("");
+  const [pickProject, setPickProject] = useState(false);
+  const [suggesting, setSuggesting] = useState(false);
   const pendingSeek = useRef<number | undefined>(seek);
 
   const load = useCallback(async () => {
@@ -91,6 +94,13 @@ export function MeetingScreen({ id, seek, segmentId, nonce, onChanged }: { id: s
     try { await api.refine(id, contextHtml); await load(); onChanged(); } catch (e) { setError(errorMessage(e)); }
   };
 
+  // Project membership: the chip opens the picker; the suggestion banner has Add / Not this one.
+  const setProject = async (pid: string | null) => { await api.setMeetingProject(id, pid); await load(); onChanged(); };
+  const suggestProject = async () => {
+    setSuggesting(true);
+    try { await api.suggestProject(id); await load(); } catch (e) { setError(errorMessage(e)); } finally { setSuggesting(false); }
+  };
+
   const doAsk = async () => {
     if (!ask.trim()) return;
     setAsking(true);
@@ -136,6 +146,14 @@ export function MeetingScreen({ id, seek, segmentId, nonce, onChanged }: { id: s
             <span className="inline-flex items-center gap-1.5"><Clock className="h-3.5 w-3.5" />{fmtClock(m.startedAt)}</span>
             {m.durationSec ? <span className="inline-flex items-center gap-1.5"><Timer className="h-3.5 w-3.5" />{fmtDuration(m.durationSec)}</span> : null}
             {m.language && <button className="inline-flex items-center gap-1.5 hover:text-fg" title="Wrong language? Click to change" onClick={() => actions.run("language", m)}><Languages className="h-3.5 w-3.5" />{langLabel(m.language)}</button>}
+            <button className={cn("inline-flex items-center gap-1.5 hover:text-fg", m.projectId && "text-fg/80")} title={m.projectId ? "Click to move to another project" : "Put this meeting in a project"} onClick={() => setPickProject(true)}>
+              <Folder className="h-3.5 w-3.5" />{m.projectName ?? <span className="italic">No project</span>}
+            </button>
+            {!m.projectId && !m.suggestedProjectId && d.summary && !processing && (
+              <button className="inline-flex items-center gap-1 text-[11.5px] hover:text-fg disabled:opacity-50" disabled={suggesting} title="Let Huddle look for a matching project" onClick={suggestProject}>
+                {suggesting ? <Spinner className="h-3 w-3" /> : <Sparkles className="h-3 w-3" />} Which project?
+              </button>
+            )}
           </div>
 
           {/* Speaker chips */}
@@ -163,6 +181,19 @@ export function MeetingScreen({ id, seek, segmentId, nonce, onChanged }: { id: s
           {(error || actions.error) && <div className="mt-3 rounded-lg border border-danger/30 bg-danger/5 px-3 py-2 text-[12.5px] text-danger">{error ?? actions.error}</div>}
 
           {d.job && d.job.state !== "ready" && <div className="mt-4"><ProcessingStatus job={d.job} onRetry={retry} onCancel={async () => { await api.cancelProcessing(id); setTimeout(load, 800); }} /></div>}
+
+          {!m.projectId && m.suggestedProjectId && (
+            <div className="mt-4 flex flex-wrap items-center gap-3 rounded-xl border border-accent/30 bg-accent-soft/60 p-3 text-[13px]">
+              <Sparkles className="h-4 w-4 shrink-0 text-accent" />
+              <div className="min-w-0 flex-1">
+                <span>Looks like part of <b>{m.suggestedProjectName}</b></span>
+                {m.suggestedProjectConfidence != null && <span className="ml-2 text-[11.5px] text-muted">{Math.round(m.suggestedProjectConfidence * 100)}% confidence</span>}
+                {m.suggestedProjectReason && <div className="mt-0.5 text-[12px] text-muted">{m.suggestedProjectReason}</div>}
+              </div>
+              <Button size="sm" variant="primary" onClick={() => setProject(m.suggestedProjectId)}><Check className="h-3 w-3" /> Add to project</Button>
+              <Button size="sm" variant="ghost" onClick={async () => { await api.dismissProjectSuggestion(id); load(); onChanged(); }}>Not this one</Button>
+            </div>
+          )}
 
           {suggestions.length > 0 && (
             <div className="mt-4 rounded-xl border border-accent/30 bg-accent-soft/60 p-3">
@@ -289,6 +320,8 @@ export function MeetingScreen({ id, seek, segmentId, nonce, onChanged }: { id: s
         onMerge={async (targetId) => { if (renaming) { await api.mergeSpeakers(id, renaming.id, targetId); setRenaming(null); load(); } }} />
 
       {actions.dialogs}
+
+      <ProjectPicker open={pickProject} onClose={() => setPickProject(false)} currentId={m.projectId} onPick={setProject} title={m.projectId ? "Move to project" : "Add to project"} />
 
       <Dialog open={refine} onClose={() => setRefine(false)} title="Refine notes" width={600}
         footer={<><Button variant="ghost" onClick={() => setRefine(false)}>Cancel</Button><Button variant="primary" disabled={!contextHtml.replace(/<[^>]*>/g, "").trim()} onClick={applyRefine}><Wand2 className="h-3.5 w-3.5" /> Apply</Button></>}>

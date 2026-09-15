@@ -20,6 +20,8 @@ import { AskScreen } from "@/screens/AskScreen";
 import { ProcessesScreen } from "@/screens/ProcessesScreen";
 import { MeetingScreen } from "@/screens/MeetingScreen";
 import { MeetingsScreen } from "@/screens/MeetingsScreen";
+import { ProjectScreen } from "@/screens/ProjectScreen";
+import { ProjectsScreen } from "@/screens/ProjectsScreen";
 import { OnboardingScreen } from "@/screens/OnboardingScreen";
 import { RecordScreen } from "@/screens/RecordScreen";
 import { SearchScreen } from "@/screens/SearchScreen";
@@ -87,6 +89,7 @@ export default function App() {
       case "new-recording": go({ kind: "record" }); break;
       case "import-audio": importAudio(); break;
       case "view-meetings": go({ kind: "meetings" }); break;
+      case "view-projects": go({ kind: "projects" }); break;
       case "view-ask": if (ai.ready) go({ kind: "ask" }); else setToast(AI_MISSING_HINT); break;
       case "view-actions": go({ kind: "actions" }); break;
       case "view-processes": go({ kind: "processes" }); break;
@@ -250,6 +253,8 @@ export default function App() {
     switch (view.kind) {
       case "meetings": return <MeetingsScreen meetings={meetings} loading={loading} onImport={importAudio} onChanged={refreshMeetings} />;
       case "meeting": return <MeetingScreen id={view.id} seek={view.seek} segmentId={view.segmentId} nonce={view.nonce} onChanged={refreshMeetings} />;
+      case "projects": return <ProjectsScreen />;
+      case "project": return <ProjectScreen id={view.id} onChanged={refreshMeetings} />;
       case "record": return settings ? <RecordScreen settings={settings} onSettings={(p) => { setSettings((s) => (s ? { ...s, ...p } : s)); api.updateSettings(p).catch(() => {}); syncShellPrefs(p); }} onRecordingStateChange={setRecording} /> : null;
       case "search": return <SearchScreen initialQuery={view.query} nonce={view.nonce} />;
       case "ask": return <AskScreen meetings={meetings ?? []} />;

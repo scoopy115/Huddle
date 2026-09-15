@@ -75,6 +75,9 @@ while IFS= read -r -d '' fw; do
 done < <(find "$ENGINE" -type d -name "*.framework" -print0)
 # 2. the system-audio helper, 3. the main executable and the bundle
 codesign "${FLAGS[@]}" --entitlements "$ENT/helper.plist" "$APP/Contents/MacOS/huddle-audio-tap" 2>&1 | grep -v "replacing existing signature" || true
+# Finder/iCloud can re-attach FinderInfo to the bundle folder while the nested binaries are
+# being signed (seen 2026-09-15: the seal failed with "detritus not allowed"); strip again.
+xattr -cr "$APP" 2>/dev/null || true
 codesign "${FLAGS[@]}" --entitlements "$ENT/app.plist" "$APP" 2>&1 | grep -v "replacing existing signature" || true
 echo "signed $signed engine binaries + helper + app with identity: $IDENTITY"
 codesign -v --strict "$APP" && echo "signature ok: $APP"

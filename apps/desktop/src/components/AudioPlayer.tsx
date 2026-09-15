@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { native } from "@/lib/native";
 import { Pause, Play, RotateCcw, RotateCw } from "lucide-react";
 import { fmtTime } from "@/lib/format";
@@ -7,6 +8,8 @@ import { Button } from "./ui";
 export interface PlayerHandle {
   seekTo: (sec: number, play?: boolean) => void;
 }
+
+const SKIP_SEC = 15;
 
 export function AudioPlayer({
   meetingId,
@@ -22,6 +25,10 @@ export function AudioPlayer({
   handleRef: React.MutableRefObject<PlayerHandle | null>;
 }) {
   const audio = useRef<HTMLAudioElement>(null);
+  const bar = useRef<HTMLDivElement>(null);
+  // The main bar sits above the transcript; once it scrolls out of view a small
+  // floating player takes over in the bottom-right corner.
+  const [barVisible, setBarVisible] = useState(true);
   const [playing, setPlaying] = useState(false);
   const [time, setTime] = useState(0);
   const [duration, setDuration] = useState(durationHint ?? 0);
@@ -62,6 +69,14 @@ export function AudioPlayer({
     if (audio.current) audio.current.playbackRate = rate;
   }, [rate]);
 
+  useEffect(() => {
+    const el = bar.current;
+    if (!el) return;
+    const obs = new IntersectionObserver(([entry]) => setBarVisible(entry.isIntersecting), { threshold: 0 });
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, [src]);
+
   if (!src) {
     return <div className="rounded-lg border border-dashed border-border px-4 py-3 text-[12px] text-muted">Audio not available for this meeting.</div>;
   }
@@ -77,14 +92,20 @@ export function AudioPlayer({
     if (a) a.currentTime = Math.min(Math.max(0, a.currentTime + d), duration || a.currentTime + d);
   };
 
-  return (
-    <div className="flex items-center gap-3 panel px-3 py-2">
-      <audio ref={audio} src={src} preload="metadata" />
-      <Button variant="ghost" size="sm" onClick={() => skip(-10)} title="Back 10 s"><RotateCcw className="h-3.5 w-3.5" /></Button>
-      <Button variant="record" size="sm" className="h-8 w-8 rounded-full p-0" onClick={toggle}>
+  const controls = (
+    <>
+      <Button variant="ghost" size="sm" onClick={() => skip(-SKIP_SEC)} title={`Back ${SKIP_SEC} s`}><RotateCcw className="h-3.5 w-3.5" /></Button>
+      <Button variant="record" size="sm" className="h-8 w-8 rounded-full p-0" onClick={toggle} title={playing ? "Pause" : "Play"}>
         {playing ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5 translate-x-px" />}
       </Button>
-      <Button variant="ghost" size="sm" onClick={() => skip(10)} title="Forward 10 s"><RotateCw className="h-3.5 w-3.5" /></Button>
+      <Button variant="ghost" size="sm" onClick={() => skip(SKIP_SEC)} title={`Forward ${SKIP_SEC} s`}><RotateCw className="h-3.5 w-3.5" /></Button>
+    </>
+  );
+
+  return (
+    <div ref={bar} className="flex items-center gap-3 panel px-3 py-2">
+      <audio ref={audio} src={src} preload="metadata" />
+      {controls}
       <span className="w-[44px] text-right font-mono text-[11px] tabular-nums text-muted">{fmtTime(time)}</span>
       <input
         type="range"
@@ -105,6 +126,16 @@ export function AudioPlayer({
       >
         {rate}×
       </button>
+      {!barVisible &&
+        createPortal(
+          <div className="animate-rise fixed bottom-5 right-5 z-30 flex items-center gap-1.5 panel py-1.5 pl-1.5 pr-3 shadow-xl">
+            {controls}
+            <span className="ml-1 font-mono text-[11px] tabular-nums text-muted">
+              {fmtTime(time)} <span className="opacity-60">/ {fmtTime(duration)}</span>
+            </span>
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }

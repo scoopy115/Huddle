@@ -15,6 +15,8 @@ import type {
   MeetingDetail,
   MeetingSpeaker,
   ProcessingJob,
+  Project,
+  ProjectDetail,
   SearchHit,
   SetupPlan,
   StorageInfo,
@@ -56,11 +58,12 @@ export const api = {
   health: () => get<{ ok: boolean; version: string; dataDir: string; activeJob: string | null }>("/health"),
 
   // meetings
-  listMeetings: (query?: string) => get<Meeting[]>(`/meetings${q({ q: query })}`),
+  listMeetings: (query?: string, opts?: { projectId?: string; unassigned?: boolean }) =>
+    get<Meeting[]>(`/meetings${q({ q: query, project_id: opts?.projectId, unassigned: opts?.unassigned })}`),
   getMeeting: (id: string) => get<MeetingDetail>(`/meetings/${id}`),
   createFromRecording: (r: RecordingSubmission) => post<Meeting>("/meetings/from-recording", r),
   importFile: (path: string, title?: string) => post<Meeting>("/meetings/import", { path, title }),
-  updateMeeting: (id: string, body: { title?: string; notes?: string; languageOverride?: string; speakerCountHint?: number }) => patch<Meeting>(`/meetings/${id}`, body),
+  updateMeeting: (id: string, body: { title?: string; notes?: string; languageOverride?: string; speakerCountHint?: number; projectId?: string }) => patch<Meeting>(`/meetings/${id}`, body),
   deleteMeeting: (id: string) => del<{ ok: boolean }>(`/meetings/${id}`),
   deleteAudio: (id: string) => post<{ freedBytes: number }>(`/meetings/${id}/delete-audio`),
   process: (id: string, opts?: { languageOverride?: string; speakerCount?: number }) => post<ProcessingJob>(`/meetings/${id}/process`, opts),
@@ -72,7 +75,18 @@ export const api = {
   exportMeeting: (id: string, format: "md" | "txt" | "json" | "srt") =>
     get<string>(`/meetings/${id}/export${q({ format })}`),
   askMeeting: (id: string, question: string) => post<AskResult>(`/meetings/${id}/ask`, { question }),
-  askAll: (question: string) => post<AskResult>("/ask", { question }),
+  askAll: (question: string, projectId?: string | null) => post<AskResult>("/ask", { question, projectId: projectId ?? null }),
+
+  // projects (folders of meetings)
+  projects: () => get<Project[]>("/projects"),
+  getProject: (id: string) => get<ProjectDetail>(`/projects/${id}`),
+  createProject: (body: { name: string; description?: string | null; meetingIds?: string[] }) => post<Project>("/projects", body),
+  updateProject: (id: string, body: { name?: string; description?: string }) => patch<Project>(`/projects/${id}`, body),
+  deleteProject: (id: string) => del<{ ok: boolean }>(`/projects/${id}`),
+  /** Put a meeting in a project ("" takes it out); settles any pending suggestion. */
+  setMeetingProject: (meetingId: string, projectId: string | null) => patch<Meeting>(`/meetings/${meetingId}`, { projectId: projectId ?? "" }),
+  suggestProject: (meetingId: string) => post<Meeting>(`/meetings/${meetingId}/project-suggestion`),
+  dismissProjectSuggestion: (meetingId: string) => del<Meeting>(`/meetings/${meetingId}/project-suggestion`),
 
   // speakers
   renameSpeaker: (meetingId: string, meetingSpeakerId: number, name: string, enroll = true) =>
@@ -87,8 +101,8 @@ export const api = {
     patch<TranscriptSegment>(`/segments/${segmentId}`, body),
 
   // search / actions
-  search: (query: string, meetingId?: string) => get<SearchHit[]>(`/search${q({ q: query, meeting_id: meetingId })}`),
-  actionItems: (openOnly = false) => get<ActionItem[]>(`/action-items${q({ open_only: openOnly })}`),
+  search: (query: string, meetingId?: string, projectId?: string) => get<SearchHit[]>(`/search${q({ q: query, meeting_id: meetingId, project_id: projectId })}`),
+  actionItems: (openOnly = false, projectId?: string) => get<ActionItem[]>(`/action-items${q({ open_only: openOnly, project_id: projectId })}`),
   updateActionItem: (id: number, body: Partial<Pick<ActionItem, "text" | "owner" | "dueDate" | "done">>) =>
     patch<ActionItem>(`/action-items/${id}`, body),
   createActionItem: (meetingId: string, body: { text: string; owner?: string | null; dueDate?: string | null }) =>

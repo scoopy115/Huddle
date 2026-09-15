@@ -32,6 +32,7 @@ from .schemas import (
     ConfirmSuggestionRequest,
     CreateActionItemRequest,
     CreateFromRecordingRequest,
+    CreateProjectRequest,
     DownloadCandidate,
     Environment,
     ImportRequest,
@@ -43,6 +44,7 @@ from .schemas import (
     StorageInfo,
     UpdateActionItemRequest,
     UpdateMeetingRequest,
+    UpdateProjectRequest,
     UpdateSegmentRequest,
 )
 from .services import action_items as ai_svc
@@ -50,6 +52,7 @@ from .services import api_keys, transcripts
 from .services import ask as ask_svc
 from .services import exports as export_svc
 from .services import meetings as ms
+from .services import projects as projects_svc
 from .services import search as search_svc
 
 log = logging.getLogger("huddle")
@@ -266,8 +269,9 @@ def delete_model(model_id: str):
 
 # ---- meetings ------------------------------------------------------------------ #
 @app.get("/meetings")
-def list_meetings(q: str | None = None, limit: int = 500):
-    return [m.model_dump(by_alias=True) for m in ms.list_meetings(ctx().db, limit=limit, query=q)]
+def list_meetings(q: str | None = None, limit: int = 500, project_id: str | None = None, unassigned: bool = False):
+    return [m.model_dump(by_alias=True)
+            for m in ms.list_meetings(ctx().db, limit=limit, query=q, project_id=project_id, unassigned=unassigned)]
 
 
 @app.post("/meetings/from-recording")
@@ -312,8 +316,13 @@ def meeting_audio(meeting_id: str):
 @app.patch("/meetings/{meeting_id}")
 def update_meeting(meeting_id: str, req: UpdateMeetingRequest):
     c = ctx()
-    m = ms.update_meeting(c.db, meeting_id, title=req.title, notes=req.notes, language_override=req.language_override,
-                          speaker_count_hint=req.speaker_count_hint)
+    if not ms.get_meeting(c.db, meeting_id):
+        raise _404()
+    try:
+        m = ms.update_meeting(c.db, meeting_id, title=req.title, notes=req.notes, language_override=req.language_override,
+                              speaker_count_hint=req.speaker_count_hint, project_id=req.project_id)
+    except KeyError:
+        raise _404("Project")
     if not m:
         raise _404()
     if req.language_override is not None:
@@ -484,7 +493,74 @@ def ask_meeting(meeting_id: str, req: AskRequest):
 
 @app.post("/ask")
 def ask_all(req: AskRequest):
-    return ask_svc.ask(ctx().db, _llm(), req.question, language=_ui_language())
+    return ask_svc.ask(ctx().db, _llm(), req.question, language=_ui_language(), project_id=req.project_id or None)
+
+
+# ---- projects ------------------------------------------------------------------ #
+@app.get("/projects")
+def list_projects():
+    return [p.model_dump(by_alias=True) for p in projects_svc.list_projects(ctx().db)]
+
+
+@app.post("/projects")
+def create_project(req: CreateProjectRequest):
+    try:
+        return projects_svc.create(ctx().db, req).model_dump(by_alias=True)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.get("/projects/{project_id}")
+def project_detail(project_id: str):
+    d = projects_svc.detail(ctx().db, project_id)
+    if not d:
+        raise _404("Project")
+    return d.model_dump(by_alias=True)
+
+
+@app.patch("/projects/{project_id}")
+def update_project(project_id: str, req: UpdateProjectRequest):
+    try:
+        p = projects_svc.update(ctx().db, project_id, name=req.name, description=req.description)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    if not p:
+        raise _404("Project")
+    return p.model_dump(by_alias=True)
+
+
+@app.delete("/projects/{project_id}")
+def delete_project(project_id: str):
+    if not projects_svc.get_project(ctx().db, project_id):
+        raise _404("Project")
+    projects_svc.delete(ctx().db, project_id)
+    return {"ok": True}
+
+
+@app.post("/meetings/{meeting_id}/project-suggestion")
+def suggest_project(meeting_id: str):
+    """Work out (again) which project the meeting probably belongs to; uses the AI model when there is one."""
+    c = ctx()
+    if not ms.get_meeting(c.db, meeting_id):
+        raise _404()
+    from .jobs.stages import StageContext, _llm_provider
+    sc = StageContext(db=c.db, cfg=c.cfg, registry=c.registry, settings=c.settings(), meeting_id=meeting_id,
+                      memory_bytes=c.hardware.get("memoryBytes"))
+    try:
+        provider, _ = _llm_provider(sc)
+    except Exception:
+        provider = None
+    projects_svc.suggest(c.db, meeting_id, provider, language=_ui_language())
+    return ms.get_meeting(c.db, meeting_id).model_dump(by_alias=True)
+
+
+@app.delete("/meetings/{meeting_id}/project-suggestion")
+def dismiss_project_suggestion(meeting_id: str):
+    c = ctx()
+    if not ms.get_meeting(c.db, meeting_id):
+        raise _404()
+    projects_svc.dismiss_suggestion(c.db, meeting_id)
+    return ms.get_meeting(c.db, meeting_id).model_dump(by_alias=True)
 
 
 @app.post("/meetings/{meeting_id}/refine")
@@ -555,18 +631,20 @@ def update_segment(segment_id: int, req: UpdateSegmentRequest):
 
 # ---- search / action items ------------------------------------------------------ #
 @app.get("/search")
-def search(q: str, limit: int = 50, meeting_id: str | None = None):
-    return [h.model_dump(by_alias=True) for h in search_svc.search(ctx().db, q, limit=limit, meeting_id=meeting_id)]
+def search(q: str, limit: int = 50, meeting_id: str | None = None, project_id: str | None = None):
+    return [h.model_dump(by_alias=True)
+            for h in search_svc.search(ctx().db, q, limit=limit, meeting_id=meeting_id, project_id=project_id)]
 
 
 @app.get("/search/meetings")
-def search_meetings(q: str, limit: int = 20):
-    return search_svc.search_meetings(ctx().db, q, limit=limit)
+def search_meetings(q: str, limit: int = 20, project_id: str | None = None):
+    return search_svc.search_meetings(ctx().db, q, limit=limit, project_id=project_id)
 
 
 @app.get("/action-items")
-def action_items(open_only: bool = False, owner: str | None = None):
-    return [a.model_dump(by_alias=True) for a in ai_svc.list_all(ctx().db, open_only=open_only, owner=owner)]
+def action_items(open_only: bool = False, owner: str | None = None, project_id: str | None = None):
+    return [a.model_dump(by_alias=True)
+            for a in ai_svc.list_all(ctx().db, open_only=open_only, owner=owner, project_id=project_id)]
 
 
 @app.post("/meetings/{meeting_id}/action-items")
