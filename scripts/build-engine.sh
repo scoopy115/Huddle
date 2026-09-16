@@ -10,8 +10,15 @@
 # models are never bundled. numba must stay: mlx_whisper needs it for word timings.
 set -euo pipefail
 cd "$(dirname "$0")/../engine"
-PY=.venv/bin/python
-$PY -m pip install -q pyinstaller
+# Release builds use the packaging venv (scripts/setup-pack-python.sh): python-build-standalone
+# plus wheels for macOS 14, so the sidecar runs on every supported Mac. The dev venv's Homebrew
+# Python only loads on the macOS it was installed on (see setup-pack-python.sh).
+if [ -x .venv-pack.nosync/bin/python ]; then
+  PY=.venv-pack.nosync/bin/python
+else
+  echo "no packaging venv; run scripts/setup-pack-python.sh first (a sidecar from the dev venv only runs on this macOS)" >&2
+  exit 1
+fi
 $PY -m PyInstaller --noconfirm --clean --name huddle-engine --onedir --distpath dist.nosync --workpath build.nosync \
   --paths . \
   --collect-all ctranslate2 --collect-all faster_whisper --collect-all av \
@@ -40,6 +47,12 @@ done
 find "$INTERNAL" -type d -empty -delete
 after=$(find "$INTERNAL" -type f | wc -l | tr -d ' ')
 echo "pruned: $before → $after files"
+
+# Nothing in the sidecar may need a newer macOS than Huddle supports (14.x).
+newest=$(find dist.nosync/huddle-engine -type f \( -name "*.so" -o -name "*.dylib" -o -name Python \) -exec sh -c \
+  'otool -l "$1" 2>/dev/null | awk "/LC_BUILD_VERSION/{f=1} f&&/minos/{print \$2; exit}"' _ {} \; | sort -V | tail -1)
+echo "highest minimum macOS in the sidecar: ${newest:-?}"
+case "${newest:-}" in 1[5-9].*|[2-9][0-9].*) echo "sidecar needs macOS $newest — rebuild the packaging venv" >&2; exit 1;; esac
 
 ls -la dist.nosync/huddle-engine/huddle-engine
 du -sh dist.nosync/huddle-engine
