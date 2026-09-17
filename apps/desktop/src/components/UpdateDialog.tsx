@@ -3,6 +3,7 @@ import { native } from "@/lib/native";
 import { fmtBytes } from "@/lib/format";
 import { dismissUpdate, installUpdate, useUpdates } from "@/lib/updates";
 import { Button, Dialog, Spinner } from "@/components/ui";
+import { Markdown } from "@/components/Markdown";
 
 const PHASES: Record<string, string> = { downloading: "Downloading", opening: "Opening" };
 
@@ -14,7 +15,7 @@ export function UpdateDialog() {
   const busy = !!u.installing;
   const p = u.installing;
   const pct = p?.total ? Math.min(100, Math.round((p.downloaded / p.total) * 100)) : null;
-  const notes = info.notes.trim().replace(/\r/g, "").slice(0, 900);
+  const notes = info.notes.trim().slice(0, 4000);
   const done = u.unpacked;
 
   return (
@@ -41,11 +42,11 @@ export function UpdateDialog() {
       ) : (
         <p className="text-muted">
           Huddle {info.version} is ready to download{u.currentVersion ? `; you have ${u.currentVersion}` : ""}.
-          {info.assetSize ? ` The download is ${fmtBytes(info.assetSize)}.` : ""} It opens as a disk image; you then drag Huddle into Applications yourself, like the first time.
+          {info.assetSize ? ` The download is ${fmtBytes(info.assetSize)}.` : ""}
         </p>
       )}
       {notes && !busy && !done && !u.installError && (
-        <pre className="mt-3 max-h-40 overflow-y-auto whitespace-pre-wrap rounded-md bg-fg/[0.04] p-2.5 font-sans text-[12px] leading-relaxed text-fg/80">{notes}</pre>
+        <div className="mt-3 max-h-56 overflow-y-auto rounded-md bg-fg/[0.04] px-3 py-2"><Markdown text={notes} /></div>
       )}
       {p && (
         <div className="mt-4">
