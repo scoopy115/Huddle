@@ -12,5 +12,6 @@ scikit-learn>=1.3          # clustering (BSD)
 sherpa-onnx>=1.12          # speaker segmentation + embeddings via ONNX Runtime (Apache-2.0); models fetched on first use
 mcp>=1.2                   # MCP server SDK (MIT)
 mlx-whisper>=0.4; sys_platform == "darwin" and platform_machine == "arm64"   # Metal Whisper (MIT)
+parakeet-mlx>=0.5; sys_platform == "darwin" and platform_machine == "arm64"  # NVIDIA Parakeet on Metal (Apache-2.0); its librosa/ffmpeg needs are bypassed (providers/parakeet.py)
 pytest>=8.0
 ruff>=0.6

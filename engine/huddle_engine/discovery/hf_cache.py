@@ -21,6 +21,7 @@ from .common import (
     RUNTIME_FASTER_WHISPER,
     RUNTIME_LLAMACPP,
     RUNTIME_MLX,
+    RUNTIME_PARAKEET_MLX,
     dir_size,
     gguf_quant_from_name,
     is_embedding_model,
@@ -55,7 +56,13 @@ def classify_repo(repo_id: str, snap: Path, source: str = "huggingface") -> list
     base_id = f"{source}:{repo_id}"
 
     is_whisper = "whisper" in lower
-    if is_whisper and "model.bin" in files and ({"vocabulary.txt", "vocabulary.json", "tokenizer.json"} & files):
+    if "parakeet" in lower and "model.safetensors" in files and "config.json" in files:
+        # NVIDIA Parakeet (TDT/CTC) converted for MLX (mlx-community/parakeet-*): safetensors + config + sentencepiece
+        out.append(LocalModel(id=base_id, name=repo_id, family="parakeet", task="transcription", source=source,
+                              format="MLX", path=str(snap), size_bytes=size, externally_managed=True,
+                              compatible_runtimes=[RUNTIME_PARAKEET_MLX],
+                              meta={"parakeet": True, "languages": 25}))
+    elif is_whisper and "model.bin" in files and ({"vocabulary.txt", "vocabulary.json", "tokenizer.json"} & files):
         out.append(LocalModel(id=base_id, name=repo_id, family="whisper", task="transcription", source=source,
                               format="CTranslate2", path=str(snap), size_bytes=size, externally_managed=True,
                               compatible_runtimes=[RUNTIME_FASTER_WHISPER],

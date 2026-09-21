@@ -58,7 +58,9 @@ export interface RecordingMeta {
 
 export interface RecordingStatus {
   recording: boolean;
+  paused: boolean;
   meta: RecordingMeta | null;
+  /** Recorded time (pauses excluded), matching the length of the audio file. */
   elapsedSec: number;
 }
 
@@ -111,6 +113,8 @@ const desktop = {
   startRecording: (deviceName: string | null, systemAudio = false, systemDeviceName: string | null = null) =>
     invoke<RecordingMeta>("start_recording", { deviceName, systemAudio, systemDeviceName }),
   stopRecording: () => invoke<RecordingMeta>("stop_recording"),
+  pauseRecording: () => invoke<RecordingStatus>("pause_recording"),
+  resumeRecording: () => invoke<RecordingStatus>("resume_recording"),
   recordingStatus: () => invoke<RecordingStatus>("recording_status"),
   listUnfinishedRecordings: () => invoke<RecordingMeta[]>("list_unfinished_recordings"),
   engineStatus: () => invoke<EngineStatus>("engine_status"),
@@ -137,6 +141,8 @@ const desktop = {
   onUpdateProgress: (cb: (p: UpdateProgress) => void): Promise<UnlistenFn> => listen<UpdateProgress>("update:progress", (ev) => cb(ev.payload)),
   onRecordingStarted: (cb: (m: RecordingMeta) => void): Promise<UnlistenFn> => listen<RecordingMeta>("recording:started", (ev) => cb(ev.payload)),
   onRecordingStopped: (cb: (m: RecordingMeta) => void): Promise<UnlistenFn> => listen<RecordingMeta>("recording:stopped", (ev) => cb(ev.payload)),
+  onRecordingPaused: (cb: (s: RecordingStatus) => void): Promise<UnlistenFn> => listen<RecordingStatus>("recording:paused", (ev) => cb(ev.payload)),
+  onRecordingResumed: (cb: (s: RecordingStatus) => void): Promise<UnlistenFn> => listen<RecordingStatus>("recording:resumed", (ev) => cb(ev.payload)),
   onRecordingError: (cb: (message: string) => void): Promise<UnlistenFn> => listen<string>("recording:error", (ev) => cb(ev.payload)),
   onRecordingWarning: (cb: (message: string) => void): Promise<UnlistenFn> => listen<string>("recording:warning", (ev) => cb(ev.payload)),
   onTrayShown: (cb: () => void): Promise<UnlistenFn> => listen<void>("tray:shown", () => cb()),

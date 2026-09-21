@@ -26,9 +26,12 @@ fn record_label(recording: bool) -> String {
 
 /// Right-click menu; the left click opens the popover.
 fn build_menu(app: &AppHandle, recording: bool) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
-    MenuBuilder::new(app)
-        .item(&MenuItemBuilder::with_id("tray-record", record_label(recording)).build(app)?)
-        .separator()
+    let mut b = MenuBuilder::new(app).item(&MenuItemBuilder::with_id("tray-record", record_label(recording)).build(app)?);
+    if recording {
+        let paused = crate::recording::is_paused(app);
+        b = b.item(&MenuItemBuilder::with_id("tray-pause", if paused { "Resume Recording" } else { "Pause Recording" }).build(app)?);
+    }
+    b.separator()
         .item(&MenuItemBuilder::with_id("tray-open", "Open Huddle").build(app)?)
         .separator()
         .item(&MenuItemBuilder::with_id("tray-quit", "Quit Huddle").build(app)?)
@@ -61,6 +64,12 @@ fn ensure_now(app: &AppHandle) {
         .tooltip("Huddle")
         .on_menu_event(|app, event| match event.id().0.as_str() {
             "tray-record" => toggle_recording(app.clone()),
+            "tray-pause" => {
+                let paused = crate::recording::is_paused(app);
+                if let Err(e) = crate::recording::set_paused(app, !paused) {
+                    log::warn!("pause from tray failed: {e}");
+                }
+            }
             "tray-open" => {
                 hide_popover(app);
                 show_main_window(app);

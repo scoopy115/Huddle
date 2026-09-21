@@ -33,6 +33,7 @@ export default function App() {
   const [meetings, setMeetings] = useState<Meeting[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [recording, setRecording] = useState(false);
+  const [paused, setPaused] = useState(false);
   const [settings, setSettings] = useState<UserSettings | null>(null);
   const [onboarded, setOnboarded] = useState<boolean | null>(null);
   const [unfinished, setUnfinished] = useState<RecordingMeta[]>([]);
@@ -127,8 +128,10 @@ export default function App() {
   useEffect(() => {
     const uns: (() => void)[] = [];
     // The shell plays the chimes for recordings it started itself.
-    native.onRecordingStarted(() => { setRecording(true); resetAudio(); }).then((u) => uns.push(u));
-    native.onRecordingStopped(() => { setRecording(false); resetAudio(); submitPending(); }).then((u) => uns.push(u));
+    native.onRecordingStarted(() => { setRecording(true); setPaused(false); resetAudio(); }).then((u) => uns.push(u));
+    native.onRecordingStopped(() => { setRecording(false); setPaused(false); resetAudio(); submitPending(); }).then((u) => uns.push(u));
+    native.onRecordingPaused(() => setPaused(true)).then((u) => uns.push(u));
+    native.onRecordingResumed(() => setPaused(false)).then((u) => uns.push(u));
     return () => uns.forEach((u) => u());
   }, [submitPending]);
   useEffect(() => {
@@ -191,6 +194,7 @@ export default function App() {
       try {
         const status = await native.recordingStatus();
         setRecording(status.recording);
+        setPaused(status.recording && status.paused);
         const list = await native.listUnfinishedRecordings();
         if (!status.recording && list.length) setUnfinished(list);
       } catch { /* recorder status unavailable */ }
@@ -268,7 +272,7 @@ export default function App() {
   return (
     <NavContext.Provider value={{ view, go, ai: { ...ai, refresh: refreshAi } }}>
       <div className="flex h-full">
-        <Sidebar engine={engine} openActions={openActions} recording={recording} running={running} />
+        <Sidebar engine={engine} openActions={openActions} recording={recording} paused={paused} running={running} />
         <main className="relative min-w-0 flex-1 bg-bg">
           {content()}
           {toast && (

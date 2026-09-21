@@ -74,10 +74,61 @@ def merge_small_clusters(X: np.ndarray, labels: np.ndarray, dur: np.ndarray,
     return labels
 
 
+# Count estimation: a cut that leaves a "speaker" with fewer windows than this is not considered.
+MIN_WINDOWS_PER_SPEAKER = 2
+# A silhouette-chosen count replaces the threshold's count only when it is clearly better…
+SILHOUETTE_MARGIN = 0.05
+# …and, when the threshold found a single voice (nothing to compare against), only when the
+# split is a clear structure on its own. Real meetings score 0.27–0.47 on the right count and
+# 0.03–0.20 on wrong splits; a one-person recording split in two scored 0.16.
+MIN_OVERRIDE_SILHOUETTE = 0.35
+# Candidate cuts: the calibrated threshold and stricter ones (looser cuts only merge voices).
+CANDIDATE_THRESHOLDS = (0.35, 0.40, 0.45, 0.50, 0.55, 0.60, 0.65, 0.70)
+
+
+def _cut(X: np.ndarray, dur: np.ndarray, threshold: float) -> np.ndarray:
+    from sklearn.cluster import AgglomerativeClustering
+    labels = AgglomerativeClustering(n_clusters=None, distance_threshold=threshold, metric="cosine", linkage="average").fit_predict(X)
+    return merge_small_clusters(X, labels, dur)
+
+
+def estimate_speaker_count(X: np.ndarray, dur: np.ndarray, threshold: float, max_speakers: int) -> tuple[np.ndarray, dict[int, float]]:
+    """Who is who, without a hint. The calibrated distance threshold is the anchor (it is right on
+    real two- and three-person meetings); on top of that the stricter cuts are scored with the
+    cosine silhouette, and a cut that finds more voices and scores clearly better takes over. One
+    fixed threshold under-counts larger groups — with more voices more pairs fall within it —
+    which the silhouette does not suffer from; outliers are folded away before scoring so a lone
+    odd window never counts as a voice. Returns (labels, silhouette per speaker count)."""
+    from sklearn.metrics import silhouette_score
+
+    anchor = _cut(X, dur, threshold)
+    k_th = len(np.unique(anchor))
+    scores: dict[int, float] = {}
+    best: dict[int, np.ndarray] = {}
+    for th in sorted({*CANDIDATE_THRESHOLDS, threshold}):
+        if th > threshold:
+            continue
+        labels = anchor if th == threshold else _cut(X, dur, th)
+        ids, counts = np.unique(labels, return_counts=True)
+        k = len(ids)
+        if k < 2 or k > max_speakers or counts.min() < MIN_WINDOWS_PER_SPEAKER:
+            continue
+        score = float(silhouette_score(X, labels, metric="cosine"))
+        if score > scores.get(k, -1.0):
+            scores[k], best[k] = score, labels
+    if not scores:
+        return anchor, scores
+    k_best = max(scores, key=lambda k: scores[k])
+    baseline = scores.get(k_th, MIN_OVERRIDE_SILHOUETTE - SILHOUETTE_MARGIN)
+    if k_best > k_th and scores[k_best] >= baseline + SILHOUETTE_MARGIN:
+        return best[k_best], scores
+    return anchor, scores
+
+
 def cluster_labels(X: np.ndarray, dur: np.ndarray, threshold: float, speaker_count: int | None, max_speakers: int) -> np.ndarray:
     """Who is who. With a speaker-count hint the embeddings are cut into exactly that many
-    clusters (the hint is the user telling us the answer); without it, agglomerative clustering
-    at `threshold` decides, tiny clusters are folded away and the count is capped."""
+    clusters (the hint is the user telling us the answer); without it the count is estimated
+    (`estimate_speaker_count`), tiny clusters are folded away and the count is capped."""
     from sklearn.cluster import AgglomerativeClustering
 
     n = len(X)
@@ -88,8 +139,7 @@ def cluster_labels(X: np.ndarray, dur: np.ndarray, threshold: float, speaker_cou
         if k == 1:
             return np.zeros(n, dtype=int)
         return AgglomerativeClustering(n_clusters=k, metric="cosine", linkage="average").fit_predict(X)
-    labels = AgglomerativeClustering(n_clusters=None, distance_threshold=threshold, metric="cosine", linkage="average").fit_predict(X)
-    labels = merge_small_clusters(X, labels, dur)
+    labels, _ = estimate_speaker_count(X, dur, threshold, max_speakers)
     return limit_clusters(X, labels, max_speakers)
 
 
@@ -194,7 +244,7 @@ class SherpaDiarizationProvider:
 
     def __init__(self, segmentation_model: str, embedding_model: str, embedding_id: str,
                  threshold: float = DEFAULT_SHERPA_THRESHOLD, speaker_count: int | None = None,
-                 max_speakers: int = 8, threads: int = 4):
+                 max_speakers: int = 12, threads: int = 4):
         self.segmentation_model = segmentation_model
         self.embedding_model = embedding_model
         self.embedding_id = embedding_id

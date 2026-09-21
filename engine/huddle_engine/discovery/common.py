@@ -10,6 +10,7 @@ RUNTIME_OLLAMA = "ollama"                     # served by the Ollama daemon
 RUNTIME_LMSTUDIO = "lmstudio"                 # served by LM Studio's local server
 RUNTIME_SHERPA = "sherpa-onnx"
 RUNTIME_MLX = "mlx-whisper"                  # MLX Whisper on Apple Silicon
+RUNTIME_PARAKEET_MLX = "parakeet-mlx"        # NVIDIA Parakeet (TDT) on Apple Silicon
 
 WHISPER_SIZE_RE = re.compile(
     r"(large-v3-turbo|large-v3|large-v2|large-v1|large|medium\.en|medium|small\.en|small|"

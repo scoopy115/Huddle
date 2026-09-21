@@ -52,7 +52,9 @@ pub struct RecordingMeta {
 #[serde(rename_all = "camelCase")]
 pub struct RecordingStatus {
     pub recording: bool,
+    pub paused: bool,
     pub meta: Option<RecordingMeta>,
+    /// Recorded time: wall clock minus pauses, so it matches the audio file's length.
     pub elapsed_sec: f64,
 }
 
@@ -79,6 +81,47 @@ struct Capture {
     sample_rate: u32,
 }
 
+/// Pause bookkeeping shared with the audio callback: while `paused`, samples are dropped (the
+/// stream stays open so resuming is instant and the microphone indicator stays on) and the
+/// elapsed time stands still.
+struct Pause {
+    paused: AtomicBool,
+    /// Total paused time in milliseconds, from finished pauses.
+    total_ms: AtomicU64,
+    since: Mutex<Option<Instant>>,
+}
+
+impl Pause {
+    fn new() -> Arc<Self> {
+        Arc::new(Pause { paused: AtomicBool::new(false), total_ms: AtomicU64::new(0), since: Mutex::new(None) })
+    }
+    fn is_paused(&self) -> bool {
+        self.paused.load(Ordering::Relaxed)
+    }
+    /// Recorded time so far, given the wall-clock start.
+    fn elapsed(&self, started: Instant) -> f64 {
+        let current = self.since.lock().ok().and_then(|g| g.map(|t| t.elapsed())).unwrap_or_default();
+        let paused = Duration::from_millis(self.total_ms.load(Ordering::Relaxed)) + current;
+        started.elapsed().saturating_sub(paused).as_secs_f64()
+    }
+    fn pause(&self) {
+        if let Ok(mut g) = self.since.lock() {
+            if g.is_none() {
+                *g = Some(Instant::now());
+            }
+        }
+        self.paused.store(true, Ordering::Relaxed);
+    }
+    fn resume(&self) {
+        self.paused.store(false, Ordering::Relaxed);
+        if let Ok(mut g) = self.since.lock() {
+            if let Some(t) = g.take() {
+                self.total_ms.fetch_add(t.elapsed().as_millis() as u64, Ordering::Relaxed);
+            }
+        }
+    }
+}
+
 struct Active {
     meta: RecordingMeta,
     started: Instant,
@@ -86,6 +129,7 @@ struct Active {
     system: Option<SystemTap>,
     stream_error: Arc<Mutex<Option<String>>>,
     stopped: Arc<AtomicBool>,
+    pause: Arc<Pause>,
 }
 
 // cpal::Stream is !Send on some platforms; we only touch it from Tauri commands and drop it on stop.
@@ -260,6 +304,7 @@ fn start_capture(
     dir: PathBuf,
     meta: Option<RecordingMeta>,
     stopped: Arc<AtomicBool>,
+    pause: Arc<Pause>,
     err_slot: Arc<Mutex<Option<String>>>,
     level_cb: Arc<dyn Fn(f32, f32) + Send + Sync>,
 ) -> Result<Capture, String> {
@@ -292,6 +337,7 @@ fn start_capture(
             let tx = tx.clone();
             let last_emit = last_emit.clone();
             let stopped = stopped.clone();
+            let pause = pause.clone();
             let level_cb = level_cb.clone();
             device.build_input_stream(
                 &config.clone().into(),
@@ -300,7 +346,10 @@ fn start_capture(
                         return;
                     }
                     let (mono, rms, peak) = downmix_to_i16(data, in_channels, $conv);
-                    let _ = tx.send(WriterMsg::Samples(mono));
+                    // Paused: keep the meter alive, write nothing.
+                    if !pause.is_paused() {
+                        let _ = tx.send(WriterMsg::Samples(mono));
+                    }
                     if let Ok(mut le) = last_emit.try_lock() {
                         if le.elapsed() >= Duration::from_millis(100) {
                             *le = Instant::now();
@@ -407,6 +456,7 @@ pub fn start(app: &AppHandle, device_name: Option<String>, want_system: bool) ->
     write_meta(&dir, &meta).map_err(|e| e.to_string())?;
 
     let stopped = Arc::new(AtomicBool::new(false));
+    let pause = Pause::new();
     let stream_error: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
     let started = Instant::now();
     let system_tap = if want_system {
@@ -421,19 +471,20 @@ pub fn start(app: &AppHandle, device_name: Option<String>, want_system: bool) ->
 
     let mic_cb: Arc<dyn Fn(f32, f32) + Send + Sync> = {
         let app = app.clone();
+        let pause = pause.clone();
         Arc::new(move |rms, peak| {
             let system_rms = sys_level.as_ref().and_then(|l| l.lock().ok().map(|g| *g));
-            let _ = app.emit("recording:level", LevelEvent { rms, peak, elapsed_sec: started.elapsed().as_secs_f64(), system_rms });
+            let _ = app.emit("recording:level", LevelEvent { rms, peak, elapsed_sec: pause.elapsed(started), system_rms });
         })
     };
-    let mic = match start_capture(&device, config, wav_path, dir.clone(), Some(meta.clone()), stopped.clone(), stream_error.clone(), mic_cb) {
+    let mic = match start_capture(&device, config, wav_path, dir.clone(), Some(meta.clone()), stopped.clone(), pause.clone(), stream_error.clone(), mic_cb) {
         Ok(c) => c,
         Err(e) => { if let Some(t) = system_tap { let _ = t.stop(); } return Err(e); }
     };
     let system = system_tap;
 
     log::info!("recording started: {} ({} Hz{})", id, sample_rate, if system.is_some() { ", + system audio" } else { "" });
-    *guard = Some(Active { meta: meta.clone(), started, mic, system, stream_error, stopped });
+    *guard = Some(Active { meta: meta.clone(), started, mic, system, stream_error, stopped, pause });
     drop(guard);
     crate::tray::refresh(app, true);
     Ok(meta)
@@ -448,7 +499,7 @@ pub fn stop(app: &AppHandle) -> Result<RecordingMeta, String> {
     let state = app.state::<RecorderState>();
     let mut guard = state.active.lock().map_err(|_| "recorder lock poisoned")?;
     let active = guard.take().ok_or("No recording in progress.")?;
-    let elapsed = active.started.elapsed().as_secs_f64();
+    let elapsed = active.pause.elapsed(active.started);
     active.stopped.store(true, Ordering::Relaxed);
 
     let mic_rate = active.mic.sample_rate;
@@ -499,11 +550,51 @@ pub fn recording_status(state: State<'_, RecorderState>) -> Result<RecordingStat
     Ok(match guard.as_ref() {
         Some(a) => RecordingStatus {
             recording: true,
+            paused: a.pause.is_paused(),
             meta: Some(a.meta.clone()),
-            elapsed_sec: a.started.elapsed().as_secs_f64(),
+            elapsed_sec: a.pause.elapsed(a.started),
         },
-        None => RecordingStatus { recording: false, meta: None, elapsed_sec: 0.0 },
+        None => RecordingStatus { recording: false, paused: false, meta: None, elapsed_sec: 0.0 },
     })
+}
+
+pub fn is_paused(app: &AppHandle) -> bool {
+    app.state::<RecorderState>().active.lock().map(|g| g.as_ref().is_some_and(|a| a.pause.is_paused())).unwrap_or(false)
+}
+
+/// Pause (`true`) or resume (`false`) the running recording. Both streams keep running; their
+/// samples are simply not written while paused, so the file stays gap-free and the timestamps of
+/// the transcript keep matching the audio. Emits `recording:paused` / `recording:resumed`.
+pub fn set_paused(app: &AppHandle, paused: bool) -> Result<RecordingStatus, String> {
+    let state = app.state::<RecorderState>();
+    let guard = state.active.lock().map_err(|_| "recorder lock poisoned")?;
+    let active = guard.as_ref().ok_or("No recording in progress.")?;
+    if active.pause.is_paused() != paused {
+        if paused {
+            active.pause.pause();
+        } else {
+            active.pause.resume();
+        }
+        if let Some(t) = active.system.as_ref() {
+            t.set_paused(paused);
+        }
+        log::info!("recording {}: {}", if paused { "paused" } else { "resumed" }, active.meta.id);
+    }
+    let status = RecordingStatus { recording: true, paused, meta: Some(active.meta.clone()), elapsed_sec: active.pause.elapsed(active.started) };
+    drop(guard);
+    let _ = app.emit(if paused { "recording:paused" } else { "recording:resumed" }, status.clone());
+    crate::tray::refresh(app, true);
+    Ok(status)
+}
+
+#[tauri::command]
+pub fn pause_recording(app: AppHandle) -> Result<RecordingStatus, String> {
+    set_paused(&app, true)
+}
+
+#[tauri::command]
+pub fn resume_recording(app: AppHandle) -> Result<RecordingStatus, String> {
+    set_paused(&app, false)
 }
 
 /// Recordings whose `recording.json` still says `recording` — the app died mid-meeting.

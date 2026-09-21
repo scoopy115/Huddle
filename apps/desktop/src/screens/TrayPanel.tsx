@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ExternalLink, Mic, Monitor, Power, Square } from "lucide-react";
+import { ExternalLink, Mic, Monitor, Pause, Play, Power, Square } from "lucide-react";
 import { native, type InputDevice, type RecordingMeta, type ShellPrefs } from "@/lib/native";
 import { fmtTime } from "@/lib/format";
 import { modKey } from "@/lib/utils";
@@ -15,6 +15,7 @@ const BARS = 40;
 export function TrayPanel() {
   const [meta, setMeta] = useState<RecordingMeta | null>(null);
   const [elapsed, setElapsed] = useState(0);
+  const [paused, setPaused] = useState(false);
   const [prefs, setPrefs] = useState<ShellPrefs | null>(null);
   const [devices, setDevices] = useState<InputDevice[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -30,6 +31,7 @@ export function TrayPanel() {
       .then((s) => {
         setMeta(s.recording ? s.meta : null);
         setElapsed(s.recording ? s.elapsedSec : 0);
+        setPaused(s.recording && s.paused);
         setBusy(false);
       })
       .catch(() => {});
@@ -53,14 +55,18 @@ export function TrayPanel() {
       .onRecordingStarted((m) => {
         setMeta(m);
         setElapsed(0);
+        setPaused(false);
         setBusy(false);
         setError(null);
       })
       .then((u) => uns.push(u));
+    native.onRecordingPaused(() => setPaused(true)).then((u) => uns.push(u));
+    native.onRecordingResumed(() => setPaused(false)).then((u) => uns.push(u));
     native.onRecordingWarning(setWarning).then((u) => uns.push(u));
     native
       .onRecordingStopped(() => {
         setMeta(null);
+        setPaused(false);
         setBusy(false);
         setWarning(null);
         levels.current.fill(0);
@@ -142,6 +148,12 @@ export function TrayPanel() {
       setBusy(false);
     });
   };
+  const togglePause = () => {
+    setError(null);
+    (paused ? native.resumeRecording() : native.pauseRecording())
+      .then((s) => setPaused(s.paused))
+      .catch((e) => setError(String(e)));
+  };
 
   return (
     <div className="flex h-screen w-screen flex-col items-stretch px-2 pb-2 pt-[9px] text-fg">
@@ -168,10 +180,16 @@ export function TrayPanel() {
           </div>
           <div className="mt-2 flex items-center justify-center gap-1.5 text-[12px] text-muted">
             {meta ? (
-              <>
-                <span className="h-2 w-2 rounded-full bg-record animate-record" />{" "}
-                Recording{meta.systemFilePath ? " with system audio" : ""}
-              </>
+              paused ? (
+                <>
+                  <Pause className="h-3 w-3" /> Paused
+                </>
+              ) : (
+                <>
+                  <span className="h-2 w-2 rounded-full bg-record animate-record" />{" "}
+                  Recording{meta.systemFilePath ? " with system audio" : ""}
+                </>
+              )
             ) : (
               <>
                 <Mic className="h-3.5 w-3.5" /> Ready to record
@@ -183,20 +201,35 @@ export function TrayPanel() {
         <canvas ref={canvas} className="relative mt-3 h-[44px] w-full" />
 
         <div className="relative mt-3 flex flex-col items-center gap-1.5">
-          <button
-            onClick={toggle}
-            disabled={busy}
-            aria-label={meta ? "Stop recording" : "Start recording"}
-            className={`pressable flex h-[60px] w-[60px] items-center justify-center rounded-full shadow-md transition-colors disabled:opacity-60 ${meta ? "bg-ink text-ink-fg" : "bg-record text-white glow-accent hover:brightness-110"}`}
-          >
-            {meta ? (
-              <Square className="h-5 w-5 fill-current" />
-            ) : (
-              <span className="h-5 w-5 rounded-full bg-white" />
+          <div className="flex items-center gap-3">
+            {meta && (
+              <button
+                onClick={togglePause}
+                disabled={busy}
+                aria-label={paused ? "Resume recording" : "Pause recording"}
+                title={paused ? "Resume" : "Pause"}
+                className="pressable flex h-[44px] w-[44px] items-center justify-center rounded-full border border-border bg-surface text-fg shadow-sm hover:bg-fg/[0.05] disabled:opacity-60"
+              >
+                {paused ? <Play className="h-4 w-4 fill-current" /> : <Pause className="h-4 w-4 fill-current" />}
+              </button>
             )}
-          </button>
+            <button
+              onClick={toggle}
+              disabled={busy}
+              aria-label={meta ? "Stop recording" : "Start recording"}
+              className={`pressable flex h-[60px] w-[60px] items-center justify-center rounded-full shadow-md transition-colors disabled:opacity-60 ${meta ? "bg-ink text-ink-fg" : "bg-record text-white glow-accent hover:brightness-110"}`}
+            >
+              {meta ? (
+                <Square className="h-5 w-5 fill-current" />
+              ) : (
+                <span className="h-5 w-5 rounded-full bg-white" />
+              )}
+            </button>
+            {/* Keep the stop button centred when the pause button is shown. */}
+            {meta && <span className="h-[44px] w-[44px]" aria-hidden="true" />}
+          </div>
           <div className="text-[12px] font-medium">
-            {meta ? "Stop and open in Huddle" : "Start Recording"}
+            {meta ? (paused ? "Paused — press play to continue" : "Stop and open in Huddle") : "Start Recording"}
           </div>
         </div>
 

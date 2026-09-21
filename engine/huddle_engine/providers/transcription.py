@@ -68,6 +68,8 @@ def release_models() -> None:
             holder = importlib.import_module("mlx_whisper.transcribe").ModelHolder
             holder.model = None
             holder.model_path = None
+        if "huddle_engine.providers.parakeet" in sys.modules:
+            sys.modules["huddle_engine.providers.parakeet"].release()
         if "mlx.core" in sys.modules:
             import mlx.core as mx
             before = mx.get_active_memory() + mx.get_cache_memory()
@@ -291,8 +293,12 @@ def mlx_available() -> bool:
 
 
 def make_transcription_provider(model, vocab: list[str] | None, device: str = "auto"):
-    """Pick the runtime for a resolved LocalModel: MLX for MLX-format models, CTranslate2 otherwise."""
+    """Pick the runtime for a resolved LocalModel: Parakeet (MLX) for the Parakeet family, MLX
+    Whisper for MLX-format Whisper, CTranslate2 otherwise."""
     ref = model.path or model.name
+    if model.family == "parakeet":
+        from .parakeet import ParakeetMlxProvider
+        return ParakeetMlxProvider(ref, vocab=vocab)
     if model.format == "MLX":
         return MlxWhisperProvider(ref, vocab=vocab)
     dev = "cpu" if device in ("auto", "cpu", "apple-gpu-metal") else device

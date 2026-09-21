@@ -206,6 +206,15 @@ impl SystemTap {
         }
     }
 
+    /// The helper keeps capturing but stops writing while paused (so `system.wav` and the
+    /// microphone file stay in step). Best effort: a helper that has gone away is noticed at stop.
+    pub fn set_paused(&self, paused: bool) {
+        if let Some(mut stdin) = self.child.stdin.as_ref() {
+            let _ = stdin.write_all(if paused { b"pause\n" } else { b"resume\n" });
+            let _ = stdin.flush();
+        }
+    }
+
     pub fn stop(mut self) -> Result<(), String> {
         if let Some(mut stdin) = self.child.stdin.take() {
             let _ = stdin.write_all(b"stop\n");

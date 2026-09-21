@@ -39,6 +39,12 @@ WHISPER_CANDIDATES: list[DownloadCandidate] = [
     DownloadCandidate(id="whisper:small", name="Whisper small", task="transcription",
                       purpose="Transcription — fastest, for older or low-memory Macs", size_bytes=484_000_000,
                       source="huggingface", url="Systran/faster-whisper-small", license="MIT"),
+    # A second family next to Whisper. Never the automatic pick: chosen by hand under Settings → Models.
+    DownloadCandidate(id="parakeet:mlx-tdt-0.6b-v3", name="Parakeet TDT 0.6B v3 (Apple Silicon)", task="transcription",
+                      purpose="Transcription on the GPU — NVIDIA's model, 25 European languages", size_bytes=2_510_000_000,
+                      source="huggingface", url="mlx-community/parakeet-tdt-0.6b-v3", license="CC-BY-4.0",
+                      license_url="https://creativecommons.org/licenses/by/4.0/",
+                      description="Dutch, English, German, French and 21 more. Punctuation and capitals from the model itself; about as fast as Whisper turbo. Experimental — pick it under Settings → Models to try it."),
 ]
 
 # Ollama library models (pulled through Ollama; sizes are Q4_K_M downloads). The 4B is the
@@ -155,14 +161,21 @@ def resolve_transcription(ctx: ResolverContext) -> Resolution:
         return auto
     m = ctx.registry.model(chosen_id)
     if m and m.compatible:
-        return Resolution(task="transcription", status="ready", model=m, provider="faster_whisper",
+        return Resolution(task="transcription", status="ready", model=m, provider=_transcription_provider_id(m),
                           reason="Selected in Settings", auto_model=auto.model)
     return Resolution(task="transcription", status="unavailable", provider="faster_whisper", auto_model=auto.model,
                       reason="The selected Whisper model is no longer available. Choose another under Settings → Models.")
 
 
+def _transcription_provider_id(m: LocalModel) -> str:
+    if m.family == "parakeet":
+        return "parakeet_mlx"
+    return "mlx_whisper" if m.format == "MLX" else "faster_whisper"
+
+
 def _auto_transcription(ctx: ResolverContext) -> Resolution:
-    models = [m for m in ctx.registry.models("transcription") if m.compatible]
+    # Automatic stays with Whisper: Parakeet is an opt-in choice (25 languages, no vocabulary prompt).
+    models = [m for m in ctx.registry.models("transcription") if m.compatible and m.family != "parakeet"]
     order = {"large-v3-turbo": 0, "turbo": 0, "large-v3": 1, "distil-large-v3": 2, "medium": 3, "large-v2": 4,
              "small": 5, "large": 6, "base": 7, "tiny": 8}
     src = {"our_app": 0, "huggingface": 1}
@@ -174,7 +187,7 @@ def _auto_transcription(ctx: ResolverContext) -> Resolution:
     if models:
         best = sorted(models, key=key)[0]
         where = {"our_app": "Installed", "huggingface": "Found in Hugging Face cache"}.get(best.source, "Found locally")
-        return Resolution(task="transcription", status="ready", model=best, provider="faster_whisper", reason=where, auto_model=best)
+        return Resolution(task="transcription", status="ready", model=best, provider=_transcription_provider_id(best), reason=where, auto_model=best)
     return Resolution(task="transcription", status="download_required", provider="faster_whisper",
                       download=_whisper_download(ctx), reason="No Whisper model installed yet")
 

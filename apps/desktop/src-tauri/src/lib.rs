@@ -142,6 +142,8 @@ pub fn run() {
             devices::list_input_devices,
             recording::start_recording,
             recording::stop_recording,
+            recording::pause_recording,
+            recording::resume_recording,
             recording::recording_status,
             recording::list_unfinished_recordings,
             recording::take_pending_recordings,

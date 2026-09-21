@@ -170,3 +170,17 @@ def test_resolution_priority_and_storage(db, cfg, monkeypatch):
     # Ollama installed but not running → the model is known but summaries cannot run.
     r = resolve_llm(_ctx(db, cfg, [_oll("qwen3.5:9b", 9.7, running=False)], ollama_status="installed_not_running"))
     assert r.status == "unavailable" and "not running" in r.reason
+
+
+def test_parakeet_repo_is_a_transcription_model_for_the_parakeet_runtime(tmp_path):
+    from huddle_engine.discovery.common import RUNTIME_PARAKEET_MLX
+    from huddle_engine.discovery.hf_cache import classify_repo
+    snap = tmp_path / "snap"
+    snap.mkdir()
+    for f in ("config.json", "model.safetensors", "tokenizer.model", "tokenizer.vocab", "vocab.txt"):
+        (snap / f).write_bytes(b"x")
+    models = classify_repo("mlx-community/parakeet-tdt-0.6b-v3", snap)
+    assert len(models) == 1
+    m = models[0]
+    assert m.task == "transcription" and m.family == "parakeet" and m.format == "MLX"
+    assert m.compatible_runtimes == [RUNTIME_PARAKEET_MLX] and m.meta.get("parakeet") is True

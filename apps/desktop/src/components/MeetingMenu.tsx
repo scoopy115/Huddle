@@ -20,7 +20,7 @@ export interface MenuMeeting {
 }
 
 /** Options for the "how many people spoke" hint: 0 = let the diarizer decide. */
-export const SPEAKER_COUNT_OPTIONS = [0, 1, 2, 3, 4, 5, 6, 7, 8];
+export const SPEAKER_COUNT_OPTIONS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
 export const speakerCountLabel = (n: number) => (n === 0 ? "Detect automatically" : n === 1 ? "1 person" : `${n} people`);
 
 export type MeetingAction = "export-md" | "export-txt" | "export-json" | "export-srt" | "export-audio" | "project" | "language" | "summary" | "reprocess" | "delete";

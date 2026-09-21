@@ -15,7 +15,7 @@ from pathlib import Path
 from ..db import Database
 from ..schemas import LocalModel, ProviderStatus
 from . import hf_cache, lmstudio, managed, ollama, whisper_cpp
-from .common import RUNTIME_FASTER_WHISPER, RUNTIME_MLX, RUNTIME_OLLAMA, RUNTIME_SHERPA
+from .common import RUNTIME_FASTER_WHISPER, RUNTIME_MLX, RUNTIME_OLLAMA, RUNTIME_PARAKEET_MLX, RUNTIME_SHERPA
 
 log = logging.getLogger(__name__)
 
@@ -23,8 +23,10 @@ log = logging.getLogger(__name__)
 # AI summaries are Ollama-only (see resolver.py); other GGUF locations are listed as
 # "different runtime" so the user knows they exist but are not used.
 def _transcription_runtimes() -> set[str]:
+    from ..providers.parakeet import parakeet_available
     from ..providers.transcription import mlx_available
-    return {RUNTIME_FASTER_WHISPER} | ({RUNTIME_MLX} if mlx_available() else set())
+    return ({RUNTIME_FASTER_WHISPER} | ({RUNTIME_MLX} if mlx_available() else set())
+            | ({RUNTIME_PARAKEET_MLX} if parakeet_available() else set()))
 
 
 SUPPORTED_RUNTIMES: dict[str, set[str]] = {

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Languages, Mic, Monitor, RefreshCw, Square, Users, X } from "lucide-react";
+import { Languages, Mic, Monitor, Pause, Play, RefreshCw, Square, Users, X } from "lucide-react";
 import { languageOptions } from "@/lib/languages";
 import { SPEAKER_COUNT_OPTIONS, speakerCountLabel } from "@/components/MeetingMenu";
 import { resetAudio, sounds } from "@/lib/sounds";
@@ -30,6 +30,7 @@ export function RecordScreen({
   const [support, setSupport] = useState<SystemAudioSupport | null>(null);
   const [meta, setMeta] = useState<RecordingMeta | null>(null);
   const [elapsed, setElapsed] = useState(0);
+  const [paused, setPaused] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [live, setLive] = useState<LiveStatus | null>(null);
@@ -46,7 +47,7 @@ export function RecordScreen({
       setDevices(d);
       if (!device && d.length) setDevice(d.find((x) => x.isDefault && !x.isLoopback)?.name ?? d[0].name);
     }).catch(() => {});
-    native.recordingStatus().then((s) => { if (s.recording && s.meta) { setMeta(s.meta); setElapsed(s.elapsedSec); } });
+    native.recordingStatus().then((s) => { if (s.recording && s.meta) { setMeta(s.meta); setElapsed(s.elapsedSec); setPaused(s.paused); } });
     refreshSupport();
     // oxlint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -65,6 +66,13 @@ export function RecordScreen({
       setElapsed(e.elapsedSec);
     }).then((u) => (unlisten = u));
     return () => unlisten?.();
+  }, []);
+  // Pause/resume can also come from the menu bar; follow the shell's state.
+  useEffect(() => {
+    const uns: (() => void)[] = [];
+    native.onRecordingPaused(() => setPaused(true)).then((u) => uns.push(u));
+    native.onRecordingResumed(() => setPaused(false)).then((u) => uns.push(u));
+    return () => uns.forEach((u) => u());
   }, []);
 
   useEffect(() => {
@@ -124,6 +132,14 @@ export function RecordScreen({
     } finally { setBusy(false); }
   };
 
+  const togglePause = async () => {
+    try {
+      const s = paused ? await native.resumeRecording() : await native.pauseRecording();
+      setPaused(s.paused);
+      sounds.tap();
+    } catch (e) { setError(errorMessage(e)); }
+  };
+
   const stop = async () => {
     setBusy(true);
     try {
@@ -132,6 +148,7 @@ export function RecordScreen({
       sounds.recordStop();
       onRecordingStateChange(false);
       setMeta(null);
+      setPaused(false);
       if (m.status !== "saved") { setError(m.error ?? "The recording could not be saved."); return; }
       if (m.durationSec < 1) { setError("The recording was too short to keep."); return; }
       try { await api.liveStop(m.id, true); } catch { /* fall back to a full transcription */ }
@@ -156,7 +173,7 @@ export function RecordScreen({
       </header>
       <div className="relative flex flex-1 flex-col items-center justify-center gap-7 px-8 pb-16">
         <div className="relative text-center">
-          {meta && (
+          {meta && !paused && (
             <>
               <span className="pointer-events-none absolute left-1/2 top-1/2 h-[220px] w-[220px] -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-accent/40 animate-ring" />
               <span className="pointer-events-none absolute left-1/2 top-1/2 h-[220px] w-[220px] -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-accent/40 animate-ring [animation-delay:1.2s]" />
@@ -164,7 +181,7 @@ export function RecordScreen({
           )}
           <div className="relative font-display text-[72px] font-bold leading-none tabular-nums tracking-tight">{fmtTime(elapsed)}</div>
           <div className="relative mt-3 flex items-center justify-center gap-2 text-[13px] text-muted">
-            {meta ? <><span className="h-2 w-2 rounded-full bg-record animate-record" /> Recording{meta.systemFilePath ? " with system audio" : ""}</> : <><Mic className="h-3.5 w-3.5" /> Ready to record</>}
+            {meta ? (paused ? <><Pause className="h-3.5 w-3.5" /> Paused</> : <><span className="h-2 w-2 rounded-full bg-record animate-record" /> Recording{meta.systemFilePath ? " with system audio" : ""}</>) : <><Mic className="h-3.5 w-3.5" /> Ready to record</>}
           </div>
         </div>
 
@@ -210,7 +227,12 @@ export function RecordScreen({
           </div>
         ) : (
           <div className="flex w-full max-w-[560px] flex-col items-center gap-3">
-            <Button variant="primary" size="lg" loading={busy} onClick={stop} className="rounded-full px-7"><Square className="h-3.5 w-3.5 fill-current" /> Stop Recording</Button>
+            <div className="flex items-center gap-2">
+              <Button variant="secondary" size="lg" disabled={busy} onClick={togglePause} className="rounded-full px-6" title={paused ? "Continue recording" : "Pause — nothing is recorded until you resume"}>
+                {paused ? <><Play className="h-3.5 w-3.5 fill-current" /> Resume</> : <><Pause className="h-3.5 w-3.5 fill-current" /> Pause</>}
+              </Button>
+              <Button variant="primary" size="lg" loading={busy} onClick={stop} className="rounded-full px-7"><Square className="h-3.5 w-3.5 fill-current" /> Stop Recording</Button>
+            </div>
             <div className="text-[12px] text-muted">{meta.inputDevice}{meta.systemFilePath ? " + system audio" : ""}</div>
             {live && live.state !== "failed" && (
               <div className="panel mt-2 w-full px-4 py-3 text-[12.5px]">

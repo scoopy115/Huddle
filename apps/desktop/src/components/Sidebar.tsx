@@ -41,7 +41,7 @@ function NavItem({ icon: Icon, label, active, onClick, count, hint, disabled, ti
   );
 }
 
-export function Sidebar({ engine, openActions, recording, running }: { engine: EngineStatus; openActions: number; recording: boolean; running: number }) {
+export function Sidebar({ engine, openActions, recording, paused, running }: { engine: EngineStatus; openActions: number; recording: boolean; paused?: boolean; running: number }) {
   const { view, go, ai } = useNav();
   const is = (k: View["kind"]) => view.kind === k || (k === "meetings" && view.kind === "meeting") || (k === "projects" && view.kind === "project");
   const offline = engine.state === "failed" || engine.state === "stopped";
@@ -73,8 +73,8 @@ export function Sidebar({ engine, openActions, recording, running }: { engine: E
             !recording && "hover:brightness-110",
           )}
         >
-          {recording ? <span className="h-2.5 w-2.5 rounded-full bg-white animate-record" /> : <Mic className="h-4 w-4 text-white" />}
-          {recording ? "Recording…" : "New Recording"}
+          {recording ? <span className={cn("h-2.5 w-2.5 rounded-full bg-white", !paused && "animate-record")} /> : <Mic className="h-4 w-4 text-white" />}
+          {recording ? (paused ? "Paused" : "Recording…") : "New Recording"}
         </button>
         {offline && (
           <div className="mt-2 flex items-center gap-2 px-2.5 py-1.5 text-[11px] text-danger">

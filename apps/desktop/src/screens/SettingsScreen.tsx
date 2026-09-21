@@ -101,6 +101,12 @@ function sourceLabel(s: string) {
 }
 /** "Whisper large-v3-turbo (Apple Silicon)" / "(CPU)": the runtime is part of the name, as in the marketplace. */
 const modelTitle = (m: LocalModel) => {
+  if (m.task === "transcription" && m.family === "parakeet") {
+    // "mlx-community/parakeet-tdt-0.6b-v3" → "Parakeet TDT 0.6B v3 (Apple Silicon)"
+    const tail = m.name.split("/").pop() ?? m.name;
+    const pretty = tail.replace(/^parakeet-/i, "").replace(/-/g, " ").replace(/\b(tdt|ctc|rnnt)\b/gi, (x) => x.toUpperCase()).replace(/(\d+\.\d+)b\b/i, "$1B");
+    return `Parakeet ${pretty} (Apple Silicon)`;
+  }
   if (m.task !== "transcription" || !m.meta.whisperSize) return m.name;
   const runtime = m.format === "MLX" ? "Apple Silicon" : m.format === "CTranslate2" ? "CPU" : m.format;
   return `Whisper ${m.meta.whisperSize}${runtime ? ` (${runtime})` : ""}`;

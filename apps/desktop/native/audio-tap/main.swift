@@ -69,6 +69,8 @@ final class TapRecorder {
     var aggID = AudioObjectID(kAudioObjectUnknown)
     var procID: AudioDeviceIOProcID?
     var writer: WavWriter?
+    /// Set from the stdin reader while the recording is paused: the tap keeps running, nothing is written.
+    var paused = false
     var format = AudioStreamBasicDescription()
     var lastLevel = Date()
     /// Loudest sample seen so far (the probe's evidence that capture works).
@@ -189,7 +191,7 @@ final class TapRecorder {
         maxAbs = max(maxAbs, peak)
         callbacks += 1
         if callbacks % 100 == 0 { readDeviceRate() }  // belt and braces next to the listener
-        if writer != nil {
+        if writer != nil && !paused {
             let out: [Int16]
             let ratio = deviceRate / sampleRate
             if abs(ratio - 1) < 1e-9 {
@@ -278,8 +280,13 @@ func runRecording(outPath: String) -> Never {
     signal(SIGTERM) { _ in exit(0) }
     signal(SIGINT) { _ in exit(0) }
     DispatchQueue.global().async {
-        // Run until stdin closes (parent dropped the pipe) or "stop" arrives.
-        while let line = readLine() { if line == "stop" { break } }
+        // Run until stdin closes (parent dropped the pipe) or "stop" arrives; "pause"/"resume"
+        // toggle writing without touching the tap.
+        while let line = readLine() {
+            if line == "stop" { break }
+            if line == "pause" { rec.paused = true }
+            if line == "resume" { rec.paused = false }
+        }
         rec.stop()
         exit(0)
     }

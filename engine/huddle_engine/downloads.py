@@ -112,7 +112,7 @@ class DownloadManager:
         root = self.models_dir / "whisper"
         root.mkdir(parents=True, exist_ok=True)
         path = snapshot_download(cand.url, cache_dir=str(root), tqdm_class=_Progress,
-                                 allow_patterns=["*.bin", "*.json", "*.txt", "*.npz", "*.safetensors"])
+                                 allow_patterns=["*.bin", "*.json", "*.txt", "*.npz", "*.safetensors", "*.model", "*.vocab"])
         size = sum(p.stat().st_size for p in Path(path).rglob("*") if p.is_file())
         self._update(cid, received_bytes=size, total_bytes=size)
         return f"our_app:{cand.url}"
