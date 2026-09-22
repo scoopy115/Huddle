@@ -9,7 +9,7 @@ import { syncShellPrefs } from "@/lib/shellPrefs";
 import { checkForUpdates, scheduleUpdateChecks } from "@/lib/updates";
 import { UpdateDialog } from "@/components/UpdateDialog";
 import { PermissionsReminder } from "@/components/PermissionsReminder";
-import { AI_MISSING_HINT, NavContext, type View } from "@/lib/nav";
+import { AI_MISSING_HINT, NavContext, defaultParent, type View } from "@/lib/nav";
 import type { Meeting, UserSettings } from "@/types/engine";
 import { Sidebar } from "@/components/Sidebar";
 import { CommandPalette } from "@/components/CommandPalette";
@@ -63,7 +63,25 @@ export default function App() {
   }, [engine.state, ai.ready, needsSetup, refreshAi]);
   const [palette, setPalette] = useState(false);
 
-  const go = useCallback((v: View) => setView(v.kind === "meeting" ? { ...v, nonce: Date.now() } : v), []);
+  // Navigation history, so the back button on a meeting returns to wherever it was opened from
+  // (a project page, search, the overview) instead of always the meeting list. Kept in refs, not
+  // state: nothing renders it, and a state updater that pushes from inside another updater would
+  // run twice under StrictMode.
+  const viewRef = useRef<View>(view);
+  useEffect(() => { viewRef.current = view; }, [view]);
+  const history = useRef<View[]>([]);
+  /** The screen a view identifies, ignoring the seek/segment/nonce details. */
+  const place = (v: View) => `${v.kind}:${"id" in v ? (v as { id?: string }).id ?? "" : ""}`;
+  const go = useCallback((v: View) => {
+    if (place(viewRef.current) !== place(v)) {
+      history.current = [...history.current.slice(-49), viewRef.current];
+    }
+    setView(v.kind === "meeting" ? { ...v, nonce: Date.now() } : v);
+  }, []);
+  const back = useCallback(() => {
+    const prev = history.current.pop() ?? defaultParent(viewRef.current);
+    setView(prev.kind === "meeting" ? { ...prev, nonce: Date.now() } : prev);
+  }, []);
 
   const refreshMeetings = useCallback(async () => {
     if (engine.state !== "ready") return;
@@ -270,7 +288,7 @@ export default function App() {
   };
 
   return (
-    <NavContext.Provider value={{ view, go, ai: { ...ai, refresh: refreshAi } }}>
+    <NavContext.Provider value={{ view, go, back, ai: { ...ai, refresh: refreshAi } }}>
       <div className="flex h-full">
         <Sidebar engine={engine} openActions={openActions} recording={recording} paused={paused} running={running} />
         <main className="relative min-w-0 flex-1 bg-bg">

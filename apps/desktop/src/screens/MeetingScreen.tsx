@@ -17,7 +17,7 @@ const langLabel = (code: string | null) =>
   (code ?? "").split(",").filter(Boolean).map((c) => languageName(c)).join(", ");
 
 export function MeetingScreen({ id, seek, segmentId, nonce, onChanged }: { id: string; seek?: number; segmentId?: number; nonce?: number; onChanged: () => void }) {
-  const { go, ai } = useNav();
+  const { back, ai } = useNav();
   const [d, setD] = useState<MeetingDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [time, setTime] = useState(0);
@@ -41,7 +41,7 @@ export function MeetingScreen({ id, seek, segmentId, nonce, onChanged }: { id: s
     try { setD(await api.getMeeting(id)); setError(null); } catch (e) { setError(errorMessage(e)); }
   }, [id]);
 
-  const actions = useMeetingActions({ onChanged: () => { load(); onChanged(); }, onDeleted: () => go({ kind: "meetings" }) });
+  const actions = useMeetingActions({ onChanged: () => { load(); onChanged(); }, onDeleted: () => back() });
 
   useEffect(() => { setD(null); load(); }, [load]);
 
@@ -118,7 +118,7 @@ export function MeetingScreen({ id, seek, segmentId, nonce, onChanged }: { id: s
   return (
     <div className="flex h-full flex-col">
       <header data-tauri-drag-region className="titlebar-drag flex h-[52px] shrink-0 items-center gap-2 border-b border-border px-4">
-        <Button variant="ghost" size="sm" onClick={() => go({ kind: "meetings" })}><ArrowLeft className="h-4 w-4" /></Button>
+        <Button variant="ghost" size="sm" title="Back" onClick={back}><ArrowLeft className="h-4 w-4" /></Button>
         <div data-tauri-drag-region className="flex-1" />
         <div className="relative">
           <Button variant="ghost" size="sm" onClick={() => setMenu(!menu)}><MoreHorizontal className="h-4 w-4" /></Button>

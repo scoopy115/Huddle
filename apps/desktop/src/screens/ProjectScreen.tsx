@@ -11,7 +11,7 @@ import { MeetingGroups, MeetingRow } from "@/components/MeetingList";
 import { ProjectForm } from "@/screens/ProjectsScreen";
 
 export function ProjectScreen({ id, onChanged }: { id: string; onChanged: () => void }) {
-  const { go, ai } = useNav();
+  const { go, back, ai } = useNav();
   const [d, setD] = useState<ProjectDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [menu, setMenu] = useState(false);
@@ -59,7 +59,7 @@ export function ProjectScreen({ id, onChanged }: { id: string; onChanged: () => 
   return (
     <div className="flex h-full flex-col">
       <header data-tauri-drag-region className="titlebar-drag flex h-[52px] shrink-0 items-center gap-2 border-b border-border px-4">
-        <Button variant="ghost" size="sm" onClick={() => go({ kind: "projects" })}><ArrowLeft className="h-4 w-4" /></Button>
+        <Button variant="ghost" size="sm" title="Back" onClick={back}><ArrowLeft className="h-4 w-4" /></Button>
         <div data-tauri-drag-region className="flex-1" />
         <Button variant="secondary" size="sm" onClick={() => setAdding(true)}><Plus className="h-3.5 w-3.5" /> Add meetings</Button>
         <div className="relative">

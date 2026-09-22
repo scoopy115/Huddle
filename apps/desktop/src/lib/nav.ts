@@ -17,9 +17,19 @@ export type View =
 export interface AiState { ready: boolean; reason: string | null; refresh: () => void }
 export const AI_MISSING_HINT = "Needs an AI model — download one under Settings → Models.";
 
-export const NavContext = createContext<{ view: View; go: (v: View) => void; ai: AiState }>({
+/** Where a back button lands with nothing on the history stack (a deep link, or the first screen). */
+export function defaultParent(view: View): View {
+  switch (view.kind) {
+    case "meeting": return { kind: "meetings" };
+    case "project": return { kind: "projects" };
+    default: return { kind: "meetings" };
+  }
+}
+
+export const NavContext = createContext<{ view: View; go: (v: View) => void; back: () => void; ai: AiState }>({
   view: { kind: "meetings" },
   go: () => {},
+  back: () => {},
   ai: { ready: true, reason: null, refresh: () => {} },
 });
 
