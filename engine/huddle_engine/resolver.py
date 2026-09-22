@@ -25,11 +25,10 @@ WHISPER_CANDIDATES: list[DownloadCandidate] = [
     DownloadCandidate(id="whisper:mlx-large-v3-turbo", name="Whisper large-v3-turbo (Apple Silicon)", task="transcription",
                       purpose="Transcription on the GPU — about 10× faster than the CPU version", size_bytes=1_620_000_000,
                       source="huggingface", url="mlx-community/whisper-large-v3-turbo", license="MIT",
-                      recommended=True, description="99 languages. Recommended on every Apple Silicon Mac."),
+                      recommended=True),
     DownloadCandidate(id="whisper:large-v3-turbo", name="Whisper large-v3-turbo (CPU)", task="transcription",
                       purpose="Transcription on the CPU — works on any Mac and on Windows", size_bytes=1_620_000_000,
-                      source="huggingface", url="mobiuslabsgmbh/faster-whisper-large-v3-turbo", license="MIT",
-                      description="Same model, slower runtime."),
+                      source="huggingface", url="mobiuslabsgmbh/faster-whisper-large-v3-turbo", license="MIT"),
     DownloadCandidate(id="whisper:large-v3", name="Whisper large-v3", task="transcription",
                       purpose="Transcription — highest accuracy, about 2× slower", size_bytes=3_090_000_000,
                       source="huggingface", url="Systran/faster-whisper-large-v3", license="MIT"),
@@ -41,10 +40,9 @@ WHISPER_CANDIDATES: list[DownloadCandidate] = [
                       source="huggingface", url="Systran/faster-whisper-small", license="MIT"),
     # A second family next to Whisper. Never the automatic pick: chosen by hand under Settings → Models.
     DownloadCandidate(id="parakeet:mlx-tdt-0.6b-v3", name="Parakeet TDT 0.6B v3 (Apple Silicon)", task="transcription",
-                      purpose="Transcription on the GPU — NVIDIA's model, 25 European languages", size_bytes=2_510_000_000,
+                      purpose="Transcription on the GPU — 25 European languages", size_bytes=2_510_000_000,
                       source="huggingface", url="mlx-community/parakeet-tdt-0.6b-v3", license="CC-BY-4.0",
-                      license_url="https://creativecommons.org/licenses/by/4.0/",
-                      description="Dutch, English, German, French and 21 more. Punctuation and capitals from the model itself; about as fast as Whisper turbo. Experimental — pick it under Settings → Models to try it."),
+                      license_url="https://creativecommons.org/licenses/by/4.0/"),
 ]
 
 # Ollama library models (pulled through Ollama; sizes are Q4_K_M downloads). The 4B is the
@@ -53,12 +51,10 @@ WHISPER_CANDIDATES: list[DownloadCandidate] = [
 LLM_CANDIDATES: list[DownloadCandidate] = [
     DownloadCandidate(id="ollama:qwen3.5:4b", name="Qwen3.5 4B", task="llm",
                       purpose="Meeting summaries — fits Macs with 8 GB or more", size_bytes=3_400_000_000,
-                      source="ollama", url="qwen3.5:4b", license="Apache-2.0", recommended=True,
-                      description="Good, quick summaries. Recommended for daily use and 99% of people."),
+                      source="ollama", url="qwen3.5:4b", license="Apache-2.0", recommended=True),
     DownloadCandidate(id="ollama:qwen3.5:9b", name="Qwen3.5 9B", task="llm",
                       purpose="Meeting summaries — fits Macs with 16 GB or more", size_bytes=6_600_000_000,
-                      source="ollama", url="qwen3.5:9b", license="Apache-2.0", min_memory_bytes=16 * GB,
-                      description="Most thorough on long meetings, but uses more processing power and takes longer to process."),
+                      source="ollama", url="qwen3.5:9b", license="Apache-2.0", min_memory_bytes=16 * GB),
 ]
 
 GOOD_LLM_FAMILIES = ("qwen3.5", "qwen35", "qwen3", "qwen2.5", "llama-3.3", "llama-3.2", "llama-3.1", "llama3", "llama",
