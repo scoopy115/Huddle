@@ -10,6 +10,18 @@
 #
 # Prerequisites: scripts/fetch-speaker-models.sh (once) and scripts/build-engine.sh.
 set -euo pipefail
+ROOT_CHECK="$(cd "$(dirname "$0")/.." && pwd)"
+# The sidecar is reused as built; engine changes only reach the app through build-engine.sh.
+# (0.7.1 shipped a day-old sidecar and still showed the previous model descriptions.)
+SIDECAR="$ROOT_CHECK/engine/dist.nosync/huddle-engine/huddle-engine"
+if [ -f "$SIDECAR" ]; then
+  NEWER="$(find "$ROOT_CHECK/engine/huddle_engine" -name '*.py' -newer "$SIDECAR" -print -quit)"
+  if [ -n "$NEWER" ]; then
+    echo "engine sources are newer than the built sidecar ($(basename "$NEWER") …) — run scripts/build-engine.sh first" >&2
+    exit 1
+  fi
+fi
+
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DIST="$ROOT/engine/dist.nosync/huddle-engine"
 [ -x "$DIST/huddle-engine" ] || { echo "engine sidecar missing — run scripts/build-engine.sh first" >&2; exit 1; }
