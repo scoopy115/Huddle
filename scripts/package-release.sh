@@ -1,21 +1,22 @@
 #!/usr/bin/env bash
-# Zip the built Huddle.app for a GitHub release. ditto keeps symlinks and the code signature
-# intact. Extended attributes / resource forks are deliberately left out (--norsrc --noextattr
-# --noqtn): ditto would store them as AppleDouble `._*` sidecars, which Archive Utility unpacks as
-# real files inside the bundle — extra files break the seal and Gatekeeper reports "damaged".
-# The signature never covers xattrs, so nothing is lost. Output sits next to the bundle.
+# Package the built Huddle.app for a GitHub release: notarize and staple the app, then build the
+# drag-to-Applications disk image (scripts/make-dmg.sh), which is the one release asset — new
+# users download it and the in-app updater (0.6.2+) opens it. The zip releases of 0.5.2–0.6.1 are
+# no longer produced; those versions show "Open download page" instead of downloading.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BUNDLE_DIR="$ROOT/apps/desktop/src-tauri/target.nosync/release/bundle/macos"
 APP="$BUNDLE_DIR/Huddle.app"
 [ -d "$APP" ] || { echo "No Huddle.app at $APP — run scripts/build-app.sh first" >&2; exit 1; }
 VERSION="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$ROOT/apps/desktop/src-tauri/tauri.conf.json")"
-OUT="$BUNDLE_DIR/Huddle-$VERSION-macos-arm64.zip"
-rm -f "$OUT"
+OUT="$BUNDLE_DIR/Huddle-$VERSION-macos-arm64.dmg"
+# A zip from an earlier run would look like a current asset next to the new image.
+rm -f "$BUNDLE_DIR/Huddle-$VERSION-macos-arm64.zip"
 
 # Notarize when a keychain profile is configured (see docs/PACKAGING.md):
 #   xcrun notarytool store-credentials huddle-notary --apple-id you@example.com --team-id TEAMID --password <app-specific password>
-# Apple's service scans the zip; the ticket is then stapled to the app so Gatekeeper accepts it offline.
+# notarytool takes the app as a temporary zip (ditto without xattrs: AppleDouble `._*` sidecars
+# would break the seal); the ticket is then stapled to the app so Gatekeeper accepts it offline.
 if [ -n "${HUDDLE_NOTARY_PROFILE:-}" ]; then
   # (no `grep -q` in pipelines here: with pipefail, grep exiting early makes the producer fail on SIGPIPE)
   SIG="$(codesign -dvv "$APP" 2>&1 || true)"
@@ -33,8 +34,5 @@ if [ -n "${HUDDLE_NOTARY_PROFILE:-}" ]; then
   spctl --assess --type execute -v "$APP"
 fi
 
-# The disk image is what new users download and what the in-app updater (0.6.2+) opens.
 "$ROOT/scripts/make-dmg.sh"
-# The zip stays for the updaters of 0.5.2–0.6.1, which look for a .zip; drop it once those are gone.
-ditto -c -k --keepParent --norsrc --noextattr --noqtn "$APP" "$OUT"
-echo "Release assets: $BUNDLE_DIR/Huddle-$VERSION-macos-arm64.dmg + $OUT ($(du -h "$OUT" | cut -f1)) — tag the release v$VERSION"
+echo "Release asset: $OUT ($(du -h "$OUT" | cut -f1)) — tag the release v$VERSION"
