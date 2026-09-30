@@ -95,3 +95,25 @@ def test_mcp_tools_share_services(tmp_path, monkeypatch):
     dec = dec if isinstance(dec, list) else [dec]
     assert dec[0]["evidenceStart"] == 0 and dec[0]["timestamp"] == "00:00"
     assert os.environ["HUDDLE_DATA_DIR"].endswith("mcp")
+
+
+def test_from_recording_twice_does_not_reprocess(client, tmp_path, monkeypatch):
+    """Recovering the same recording again (older versions offered it on every launch) returns
+    the existing meeting and must not queue it again: that would overwrite renames and notes."""
+    import numpy as np
+    import soundfile as sf
+
+    import huddle_engine.app as appmod
+    h = {"Authorization": "Bearer secret"}
+    wav = tmp_path / "rec.wav"
+    sf.write(str(wav), np.zeros(16000, dtype=np.float32), 16000, subtype="PCM_16")
+    queued: list[str] = []
+    monkeypatch.setattr(appmod.ctx().jobs, "enqueue", lambda mid, *a, **k: queued.append(mid))
+    body = {"id": "rec-1", "filePath": str(wav), "startedAt": 1.0, "durationSec": 1.0, "source": "recovered",
+            "title": "Recovered recording", "process": True}
+    first = client.post("/meetings/from-recording", json=body, headers=h)
+    assert first.status_code == 200 and queued == ["rec-1"]
+    client.patch("/meetings/rec-1", json={"title": "Interview with Sara"}, headers=h)
+    again = client.post("/meetings/from-recording", json=body, headers=h)
+    assert again.status_code == 200 and again.json()["title"] == "Interview with Sara"
+    assert queued == ["rec-1"]

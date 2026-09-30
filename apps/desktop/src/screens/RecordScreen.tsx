@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Languages, Mic, Monitor, Pause, Play, RefreshCw, Square, Users, X } from "lucide-react";
+import { Languages, Mic, Monitor, NotebookPen, Pause, Play, RefreshCw, Square, Users, X } from "lucide-react";
 import { languageOptions } from "@/lib/languages";
-import { SPEAKER_COUNT_OPTIONS, speakerCountLabel } from "@/components/MeetingMenu";
+import { MODE_OPTIONS, SPEAKER_COUNT_OPTIONS, speakerCountLabel } from "@/components/MeetingMenu";
 import { resetAudio, sounds } from "@/lib/sounds";
 import { native, type InputDevice, type RecordingMeta, type SystemAudioSupport } from "@/lib/native";
 import { api, errorMessage } from "@/lib/api";
 import { fmtTime } from "@/lib/format";
 import { useNav } from "@/lib/nav";
-import type { LiveStatus, UserSettings } from "@/types/engine";
+import type { LiveStatus, MeetingMode, UserSettings } from "@/types/engine";
 import { Button, Select } from "@/components/ui";
 
 const BARS = 56;
@@ -27,6 +27,7 @@ export function RecordScreen({
   const [systemAudio, setSystemAudio] = useState<boolean>(settings["recording.systemAudio"]);
   const [language, setLanguage] = useState<string>("auto");
   const [speakerCount, setSpeakerCount] = useState(0);
+  const [mode, setMode] = useState<MeetingMode>("meeting");
   const [support, setSupport] = useState<SystemAudioSupport | null>(null);
   const [meta, setMeta] = useState<RecordingMeta | null>(null);
   const [elapsed, setElapsed] = useState(0);
@@ -67,9 +68,19 @@ export function RecordScreen({
     }).then((u) => (unlisten = u));
     return () => unlisten?.();
   }, []);
-  // Pause/resume can also come from the menu bar; follow the shell's state.
+  // Start, stop and pause can also come from the menu bar or ⌥⌘R; follow the shell's state.
+  // A recording stopped there is turned into a meeting by App (pending queue), not here.
   useEffect(() => {
     const uns: (() => void)[] = [];
+    native.onRecordingStarted((m) => {
+      setMeta(m);
+      setElapsed(0);
+      setPaused(false);
+      setError(null);
+      levels.current.fill(0);
+      sysLevels.current.fill(0);
+    }).then((u) => uns.push(u));
+    native.onRecordingStopped(() => { setMeta(null); setPaused(false); }).then((u) => uns.push(u));
     native.onRecordingPaused(() => setPaused(true)).then((u) => uns.push(u));
     native.onRecordingResumed(() => setPaused(false)).then((u) => uns.push(u));
     return () => uns.forEach((u) => u());
@@ -157,6 +168,7 @@ export function RecordScreen({
         inputDevice: m.inputDevice, sampleRate: m.sampleRate, channels: m.channels, format: m.format, source: "recorded", process: true,
         language: language === "auto" ? null : language,
         speakerCount: speakerCount || null,
+        mode,
       });
       if (m.error) setError(m.error);
       go({ kind: "meeting", id: meeting.id });
@@ -216,6 +228,12 @@ export function RecordScreen({
               <span className="inline-flex items-center gap-2 text-muted"><Users className="h-3.5 w-3.5" /> People speaking</span>
               <Select value={String(speakerCount)} onChange={(e) => setSpeakerCount(Number(e.target.value))}>
                 {SPEAKER_COUNT_OPTIONS.map((n) => <option key={n} value={n}>{speakerCountLabel(n)}</option>)}
+              </Select>
+            </label>
+            <label className="flex items-center justify-between gap-3 text-[13px]">
+              <span className="inline-flex items-center gap-2 text-muted" title={MODE_OPTIONS.find((o) => o.value === mode)?.hint}><NotebookPen className="h-3.5 w-3.5" /> Notes style</span>
+              <Select value={mode} onChange={(e) => setMode(e.target.value as MeetingMode)}>
+                {MODE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
               </Select>
             </label>
             {systemAudio && support && !support.supported && (

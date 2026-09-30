@@ -4,6 +4,7 @@ import time
 from datetime import UTC
 
 import numpy as np
+import pytest
 import soundfile as sf
 
 from huddle_engine.schemas import CreateFromRecordingRequest
@@ -130,6 +131,26 @@ def test_exports(db, cfg):
     assert data["decisions"][0]["evidenceStart"] == 0.0
     txt, _ = exports.export(db, "m1", "txt")
     assert "[00:00] Alex:" in txt
+
+
+def test_interview_mode_round_trip(db, cfg):
+    _meeting(db, cfg)
+    assert ms.get_meeting(db, "m1").mode == "meeting"
+    ms.update_meeting(db, "m1", mode="interview")
+    assert ms.get_meeting(db, "m1").mode == "interview"
+    with pytest.raises(ValueError):
+        ms.update_meeting(db, "m1", mode="podcast")
+    db.execute("INSERT INTO interview_questions(meeting_id, position, question, answer, answered_by, evidence_start, evidence_end)"
+               " VALUES ('m1', 0, 'Waarom blauw?', 'Omdat het rustig oogt.', 'Speaker 1', 0.0, 4.0)")
+    d = ms.get_detail(db, "m1")
+    assert d.questions[0].question == "Waarom blauw?" and d.questions[0].answered_by == "Speaker 1"
+    a, _ = _transcript(db)
+    transcripts.rename_speaker(db, a, "Alex")
+    assert ms.get_questions(db, "m1")[0].answered_by == "Alex"
+    md, _ = exports.export(db, "m1", "md")
+    assert "## Questions" in md and "### Waarom blauw? `00:00`" in md and "Omdat het rustig oogt. — Alex" in md
+    js, _ = exports.export(db, "m1", "json")
+    assert json.loads(js)["meeting"]["mode"] == "interview" and json.loads(js)["questions"][0]["answer"] == "Omdat het rustig oogt."
 
 
 def test_delete_meeting_removes_files_inside_data_dir_only(db, cfg, tmp_path):

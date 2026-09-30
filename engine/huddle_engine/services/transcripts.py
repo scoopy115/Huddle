@@ -105,6 +105,11 @@ def propagate_name(db: Database, meeting_id: str, old: str, new: str) -> None:
                       (_replace_name(r["title"], old, new), _replace_name(r["summary"], old, new), r["id"]))
         for r in c.execute("SELECT id, text FROM decisions WHERE meeting_id = ?", (meeting_id,)).fetchall():
             c.execute("UPDATE decisions SET text = ? WHERE id = ?", (_replace_name(r["text"], old, new), r["id"]))
+        for r in c.execute("SELECT id, question, answer, asked_by, answered_by FROM interview_questions WHERE meeting_id = ?",
+                           (meeting_id,)).fetchall():
+            c.execute("UPDATE interview_questions SET question = ?, answer = ?, asked_by = ?, answered_by = ? WHERE id = ?",
+                      (_replace_name(r["question"], old, new), _replace_name(r["answer"], old, new),
+                       new if r["asked_by"] == old else r["asked_by"], new if r["answered_by"] == old else r["answered_by"], r["id"]))
         for r in c.execute("SELECT id, text FROM action_items WHERE meeting_id = ?", (meeting_id,)).fetchall():
             c.execute("UPDATE action_items SET text = ? WHERE id = ?", (_replace_name(r["text"], old, new), r["id"]))
 

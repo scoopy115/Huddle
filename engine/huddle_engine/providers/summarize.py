@@ -64,6 +64,33 @@ class NotesOut(BaseModel):
     actionItems: list[ActionItemOut] = Field(default_factory=list)
 
 
+class AnswerOut(BaseModel):
+    by: str | None = None
+    text: Text = ""
+
+
+class QuestionOut(BaseModel):
+    question: Text
+    answers: list[AnswerOut] = Field(default_factory=list)
+    answer: Text = ""                    # tolerated when a small model flattens the answers
+    askedBy: str | None = None
+    evidenceSegments: list[int] = Field(default_factory=list)
+
+
+class InterviewOut(BaseModel):
+    title: Text = ""
+    about: Text = ""
+    highlights: Text = ""
+    summary: Text = ""                   # tolerated when a model collapses about + highlights
+    questions: list[QuestionOut] = Field(default_factory=list)
+    actionItems: list[ActionItemOut] = Field(default_factory=list)
+
+    @property
+    def summary_text(self) -> str:
+        parts = [p.strip() for p in (self.about, self.highlights) if p and p.strip()]
+        return "\n\n".join(parts) if parts else self.summary.strip()
+
+
 @dataclass
 class Evidence:
     start: float | None = None
@@ -93,6 +120,16 @@ class Topic:
 
 
 @dataclass
+class Question:
+    """An interview question with the complete answer gathered from the whole conversation."""
+    question: str
+    answer: str
+    asked_by: str | None = None
+    answered_by: str | None = None
+    evidence: Evidence = field(default_factory=Evidence)
+
+
+@dataclass
 class MeetingNotes:
     summary: str
     topics: list[Topic]
@@ -102,6 +139,7 @@ class MeetingNotes:
     model: str
     raw: str | None = None
     title: str = ""          # short descriptive title proposed by the model ("" = none)
+    questions: list[Question] = field(default_factory=list)   # interview mode only
 
 
 # Languages the notes can be written in (same list as the UI's lib/languages.ts). Names are in
@@ -139,6 +177,33 @@ Rules:
 - dueDate: ONLY a deadline stated for THIS task. Convert relative dates ("vrijdag", "next week", "morgen") to YYYY-MM-DD using the meeting date given. Dates mentioned for other things (a launch date, another task) do not count. NEVER invent a deadline; otherwise dueDate must be null.
 - evidenceSegments must list the index numbers of the transcript lines that support the item.
 - Keep texts short and concrete. Do not add commentary outside the JSON."""
+
+INTERVIEW_PROMPT = """You are a meticulous assistant that turns the transcript of an interview into clean, structured notes.
+One or more interviewers ask questions; one or more people answer. The transcript may be in any language or a mix of languages. Write ALL notes in {notes_language}, regardless of the language spoken.
+Each transcript line starts with a segment index in brackets, a timestamp and a speaker label.
+
+Respond with ONE strict JSON object and nothing else, matching exactly:
+{
+  "title": "A short, specific title for this interview in 3-7 words: the person or subject, no date, no 'Interview with'.",
+  "about": "One paragraph: what the interview was about and who was interviewed, as far as the transcript shows.",
+  "highlights": "One or two paragraphs: the most important answers and standpoints from the WHOLE interview, with the concrete details (names, numbers, examples, reasons) that were given.",
+  "questions": [{"question": "the question as it was asked, cleaned up into one clear sentence", "askedBy": "name or null", "answers": [{"by": "name or null", "text": "this person's complete answer, see the rules"}], "evidenceSegments": [12, 13, 40]}],
+  "actionItems": [{"text": "concrete task", "owner": "name or null", "dueDate": "YYYY-MM-DD or null", "confidence": 0.0-1.0, "evidenceSegments": [31]}]
+}
+
+Rules:
+- List EVERY real question the interviewer(s) asked, in the order they were first asked. Skip backchannel ("right?", "you know?"), small talk and rhetorical remarks. A rephrasing, or a follow-up that only digs deeper into the same subject, belongs to the original question and is not a new one.
+- The answer is EVERYTHING the interviewee said in reply to that question, wherever in the interview it was said. When a later answer comes back to an earlier question, refers to it or adds to it, put that part under the earlier question. Never lose a detail because it was said later.
+- Write each answer as a clean, faithful account in the first person, as the interviewee would put it in writing: without fillers ("uh", "um", "you know"), false starts, repetitions and the interviewer's interjections. Condense, but keep every concrete detail: names, numbers, dates, places, examples, reasons and nuances, copied exactly as they were said. A rich answer may be several sentences or a short paragraph; a one-word answer stays one word.
+- answers holds one entry PER PERSON who answered, in speaking order: one person → one entry; two people → two entries, each with only that person's own words. Never blend two people's words into one "I".
+- askedBy / by: ONLY real names that appear in the transcript (as a speaker's name or because someone is addressed by name). Labels like "Speaker 2" are not names; use null instead.
+- evidenceSegments: the index numbers of the transcript lines with the question and its answer(s).
+- actionItems: only concrete tasks someone committed to or was asked to do during the interview itself (send a document, follow up, arrange a visit). The interviewee's plans, intentions and future business steps are answers, NOT action items. owner and dueDate follow the same never-invent rules: a real name from the transcript or null; a date stated for THIS task converted to YYYY-MM-DD with the meeting date, or null.
+- Do not add commentary outside the JSON."""
+
+INTERVIEW_MERGE_PROMPT = """You are merging partial interview notes (JSON objects, in order) from consecutive parts of one interview into a single notes object with the same schema.
+Keep the questions in the order they were first asked. When two parts contain the same question (or a rephrasing of it), keep it once and combine the answers per person (one answers entry per person) without losing any detail. When a later part contains an answer that belongs to a question from an earlier part, move it under that question. Keep evidenceSegments from the parts; keep names null when they were null. Deduplicate action items.
+Write in {notes_language}. Respond with ONE strict JSON object with keys title, about, highlights, questions, actionItems and nothing else."""
 
 MERGE_PROMPT = """You are merging partial meeting notes (JSON objects, in order) from consecutive parts of one meeting into a single notes object with the same schema.
 Deduplicate topics, decisions and action items; keep evidenceSegments from the parts; keep owner/dueDate null when they were null.
@@ -231,12 +296,19 @@ def _clean_date(d: str | None) -> str | None:
     return None            # anything vaguer than a date is not a deadline
 
 
-def _call(provider, system: str, user: str) -> NotesOut:
-    raw = provider.complete_json(system, user, max_tokens=4000)
+def _call(provider, system: str, user: str, model=NotesOut, max_tokens: int = 4000):
+    raw = provider.complete_json(system, user, max_tokens=max_tokens)
     try:
-        return NotesOut.model_validate(parse_json_object(raw)), raw
+        return model.model_validate(parse_json_object(raw)), raw
     except (ValueError, ValidationError) as e:
         raise ProviderError("The AI model returned an unusable response.", detail=f"{e}\n---\n{raw[:4000]}") from e
+
+
+def _action_items(items: list[ActionItemOut], segments: list[Segment]) -> list[ActionItem]:
+    return [ActionItem(a.text.strip(), _clean_owner(a.owner), _clean_date(a.dueDate),
+                       (max(0.0, min(1.0, float(a.confidence))) if a.confidence is not None else None),
+                       _evidence(a.evidenceSegments, segments))
+            for a in items if a.text.strip()]
 
 
 def _to_notes(out: NotesOut, segments: list[Segment], provider_id: str, model: str, raw: str | None) -> MeetingNotes:
@@ -246,11 +318,49 @@ def _to_notes(out: NotesOut, segments: list[Segment], provider_id: str, model: s
         topics=[Topic(t.title.strip(), t.summary.strip()) for t in out.topics if t.title.strip()],
         decisions=[Decision(d.text.strip(), _evidence(d.evidenceSegments, segments))
                    for d in out.decisions if d.text.strip()],
-        action_items=[ActionItem(a.text.strip(), _clean_owner(a.owner), _clean_date(a.dueDate),
-                                 (max(0.0, min(1.0, float(a.confidence))) if a.confidence is not None else None),
-                                 _evidence(a.evidenceSegments, segments))
-                      for a in out.actionItems if a.text.strip()],
+        action_items=_action_items(out.actionItems, segments),
         provider=provider_id, model=model, raw=raw)
+
+
+def _interview_to_notes(out: InterviewOut, segments: list[Segment], provider_id: str, model: str,
+                        raw: str | None) -> MeetingNotes:
+    return MeetingNotes(
+        title=clean_title(out.title),
+        summary=out.summary_text,
+        topics=[], decisions=[],
+        questions=[_question(q, segments) for q in out.questions if q.question.strip()],
+        action_items=_action_items(out.actionItems, segments),
+        provider=provider_id, model=model, raw=raw)
+
+
+def _one_line(text: str) -> str:
+    return " ".join(text.split()).strip()
+
+
+def _question(q: QuestionOut, segments: list[Segment]) -> Question:
+    """One answers entry per person. A single answer is stored as plain text; several are
+    joined as "Name: …" paragraphs so the reader sees who said what."""
+    raw = [(_clean_owner(a.by), _strip_fillers(a.text)) for a in q.answers if a.text.strip()]
+    if not raw and q.answer.strip():
+        raw = [(None, _strip_fillers(q.answer))]
+    # everything one person said about this question becomes one paragraph, in speaking order
+    answers: list[tuple[str | None, str]] = []
+    for by, t in raw:
+        if not t:
+            continue
+        for i, (b, prev) in enumerate(answers):
+            if b == by:
+                answers[i] = (b, f"{prev} {t}")
+                break
+        else:
+            answers.append((by, t))
+    names = [by for by, _ in answers if by]
+    if len(answers) <= 1:
+        text = answers[0][1] if answers else ""
+    else:
+        text = "\n\n".join(f"{by}: {t}" if by else t for by, t in answers)
+    return Question(_one_line(q.question), text, _clean_owner(q.askedBy), ", ".join(names) or None,
+                    _evidence(q.evidenceSegments, segments))
 
 
 def _context_block(user_context: str | None) -> str:
@@ -262,43 +372,51 @@ def _context_block(user_context: str | None) -> str:
 
 def summarize(provider, segments: list[Segment], speaker_names: dict[str | None, str],
               meeting_date: str, language_hint: str | None = None, notes_language: str = "en",
-              include_actions: bool = True, user_context: str | None = None) -> MeetingNotes:
+              include_actions: bool = True, user_context: str | None = None, mode: str = "meeting") -> MeetingNotes:
     """Produce structured notes with the given LLM provider, or the extractive fallback.
-    Notes are written in `notes_language` (the app's UI language), never in the spoken one."""
+    Notes are written in `notes_language` (the app's UI language), never in the spoken one.
+    `mode` "interview" yields a summary plus every question with its complete answer instead
+    of topics and decisions."""
     if not segments:
         return MeetingNotes("", [], [], [], provider="none", model="none")
+    interview = mode == "interview"
     if isinstance(provider, ExtractiveProvider):
-        notes = extractive_notes(segments, speaker_names)
+        notes = extractive_interview(segments, speaker_names) if interview else extractive_notes(segments, speaker_names)
         if not include_actions:
             notes.action_items = []
         return notes
 
     lang_name = LANG_NAMES.get(notes_language, notes_language)
-    system = SYSTEM_PROMPT.replace("{notes_language}", lang_name)
+    system = (INTERVIEW_PROMPT if interview else SYSTEM_PROMPT).replace("{notes_language}", lang_name)
     if not include_actions:
         system += "\n- Return an empty actionItems list; action items are extracted separately."
+    out_model = InterviewOut if interview else NotesOut
+    to_notes = _interview_to_notes if interview else _to_notes
+    max_tokens = 6000 if interview else 4000      # answers are quoted at length
     lines = render_transcript(segments, speaker_names)
-    header = f"Meeting date: {meeting_date}.{_calendar_hint(meeting_date)}"
+    header = f"{'Interview' if interview else 'Meeting'} date: {meeting_date}.{_calendar_hint(meeting_date)}"
     if language_hint and language_hint != "auto":
         header += f" Spoken language(s): {language_hint}."
     header += _context_block(user_context)
     chunks = _chunks(lines, CHUNK_CHARS)
 
     if len(chunks) == 1:
-        out, raw = _call(provider, system, f"{header}\n\nTranscript:\n" + "\n".join(lines) + "\n\nReturn the JSON now.")
-        notes = _to_notes(out, segments, provider.id, provider.model, raw)
+        out, raw = _call(provider, system, f"{header}\n\nTranscript:\n" + "\n".join(lines) + "\n\nReturn the JSON now.",
+                         out_model, max_tokens)
+        notes = to_notes(out, segments, provider.id, provider.model, raw)
     else:
-        partials: list[NotesOut] = []
+        partials = []
         for n, chunk in enumerate(chunks, 1):
             log.info("summarize: chunk %d/%d (%d lines)", n, len(chunks), len(chunk))
             out, _ = _call(provider, system,
-                           f"{header} This is part {n} of {len(chunks)} of the meeting.\n\nTranscript:\n"
-                           + "\n".join(chunk) + "\n\nReturn the JSON now.")
+                           f"{header} This is part {n} of {len(chunks)} of the {'interview' if interview else 'meeting'}.\n\nTranscript:\n"
+                           + "\n".join(chunk) + "\n\nReturn the JSON now.", out_model, max_tokens)
             partials.append(out)
         merged_input = "\n\n".join(p.model_dump_json() for p in partials)
-        out, raw = _call(provider, MERGE_PROMPT.replace("{notes_language}", lang_name),
-                         f"{header}\n\nPartial notes:\n{merged_input}\n\nReturn the merged JSON now.")
-        notes = _to_notes(out, segments, provider.id, provider.model, raw)
+        out, raw = _call(provider, (INTERVIEW_MERGE_PROMPT if interview else MERGE_PROMPT).replace("{notes_language}", lang_name),
+                         f"{header}\n\nPartial notes:\n{merged_input}\n\nReturn the merged JSON now.", out_model,
+                         8000 if interview else 4000)
+        notes = to_notes(out, segments, provider.id, provider.model, raw)
     if not include_actions:
         notes.action_items = []
     return notes
@@ -457,3 +575,59 @@ def extractive_notes(segments: list[Segment], speaker_names: dict[str | None, st
         decisions=[Decision(d, find_evidence(d)) for d in summ.decisions],
         action_items=[ActionItem(a, None, None, 0.4, find_evidence(a)) for a in action_sentences(texts)],
         provider="extractive", model="extractive")
+
+
+_FILLERS = re.compile(r"\b(?:uh+m*|u+m+|eh+m*|ehm|hmm+|erm|mm+|nou ja|zeg maar|you know|i mean|like,)\b[,.]?\s*", re.IGNORECASE)
+_QUESTION_SENTENCE = re.compile(r"[^.!?]*\?")
+
+
+def _strip_fillers(text: str) -> str:
+    t = _FILLERS.sub("", text)
+    t = re.sub(r"\s+([,.!?])", r"\1", t)
+    t = re.sub(r"\s{2,}", " ", t).strip()
+    return t[:1].upper() + t[1:] if t else t
+
+
+def extractive_interview(segments: list[Segment], speaker_names: dict[str | None, str]) -> MeetingNotes:
+    """Dependency-free interview fallback: every line that asks something becomes a question;
+    what other speakers say until the next question is its answer, with fillers removed.
+    Answers given later that refer back to an earlier question cannot be detected without a
+    model, so they stay with the question they followed."""
+    from ..text import extractive_summary
+
+    texts = [s.text.strip() for s in segments if s.text.strip()]
+    summ = extractive_summary(" ".join(texts))
+    name = lambda s: speaker_names.get(s.speaker_label, s.speaker_label)  # noqa: E731
+    questions: list[Question] = []
+    i = 0
+    while i < len(segments):
+        s = segments[i]
+        asks = _QUESTION_SENTENCE.findall(s.text)
+        if not asks:
+            i += 1
+            continue
+        q_text = _strip_fillers(asks[-1].strip())
+        if len(q_text) < 8:
+            i += 1
+            continue
+        parts, j = [], i + 1
+        who: list[str] = []
+        while j < len(segments) and not (segments[j].speaker_label != s.speaker_label and "?" in segments[j].text) \
+                and not (segments[j].speaker_label == s.speaker_label and "?" in segments[j].text):
+            t = segments[j]
+            if t.speaker_label != s.speaker_label and t.text.strip():
+                parts.append(_strip_fillers(t.text.strip()))
+                n = name(t)
+                if n and n not in who:
+                    who.append(n)
+            j += 1
+        answer = " ".join(parts).strip()
+        if answer:
+            asked = name(s)
+            questions.append(Question(q_text, answer,
+                                      asked if asked and not re.fullmatch(r"(speaker|spreker)\s*\d+", asked, re.I) else None,
+                                      ", ".join(w for w in who if not re.fullmatch(r"(speaker|spreker)\s*\d+", w, re.I)) or None,
+                                      Evidence(start=s.start, end=segments[j - 1].end if j - 1 > i else s.end, segment_idx=i)))
+        i = max(j, i + 1)
+    return MeetingNotes(summary=summ.overview, topics=[], decisions=[], action_items=[], questions=questions,
+                        provider="extractive", model="extractive")

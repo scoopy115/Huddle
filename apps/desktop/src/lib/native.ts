@@ -133,6 +133,7 @@ const desktop = {
   onShellPrefsChanged: (cb: (p: ShellPrefs) => void): Promise<UnlistenFn> => listen<ShellPrefs>("shell-prefs:changed", (ev) => cb(ev.payload)),
   takePendingRecordings: () => invoke<RecordingMeta[]>("take_pending_recordings"),
   discardUnfinishedRecordings: (ids: string[]) => invoke<void>("discard_unfinished_recordings", { ids }),
+  markRecordingsSubmitted: (ids: string[]) => invoke<void>("mark_recordings_submitted", { ids }),
   copyFile: (src: string, dst: string) => invoke<number>("copy_file", { src, dst }),
   appInfo: () => invoke<AppInfo>("app_info"),
   checkForUpdates: () => invoke<UpdateCheck>("check_for_updates"),

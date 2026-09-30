@@ -214,7 +214,18 @@ export default function App() {
         setRecording(status.recording);
         setPaused(status.recording && status.paused);
         const list = await native.listUnfinishedRecordings();
-        if (!status.recording && list.length) setUnfinished(list);
+        if (!status.recording && list.length) {
+          // Recordings that already became a meeting (recovered by an older version, which never
+          // marked them handled) are settled silently instead of being offered again.
+          const done: string[] = [];
+          const open: RecordingMeta[] = [];
+          for (const r of list) {
+            if (await api.getMeeting(r.id).then(() => true, () => false)) done.push(r.id);
+            else open.push(r);
+          }
+          if (done.length) native.markRecordingsSubmitted(done).catch(() => {});
+          if (open.length) setUnfinished(open);
+        }
       } catch { /* recorder status unavailable */ }
     })();
   }, [engine.state, refreshMeetings]);
@@ -231,19 +242,23 @@ export default function App() {
   const running = useMemo(() => meetings?.filter((m) => m.status === "processing").length ?? 0, [meetings]);
   useEffect(() => { native.setTrayBusy(running > 0).catch(() => {}); }, [running]);
 
-  const recover = async (keep: boolean) => {
+  /** Yes: turn them into meetings. No: delete the audio. Later: ask again on the next launch. */
+  const recover = async (choice: "yes" | "no" | "later") => {
     const list = unfinished;
     setUnfinished([]);
-    if (!keep) {
-      // Dismissing is a decision: the files go, so the prompt does not come back on every launch.
+    if (choice === "later") return;
+    if (choice === "no") {
       native.discardUnfinishedRecordings(list.map((r) => r.id)).catch(() => {});
       return;
     }
+    const done: string[] = [];
     for (const r of list) {
       try {
         await api.createFromRecording({ id: r.id, filePath: r.filePath, systemFilePath: r.systemFilePath ?? null, startedAt: r.startedAt, durationSec: r.durationSec, inputDevice: r.inputDevice, sampleRate: r.sampleRate, channels: r.channels, format: r.format, source: "recovered", title: "Recovered recording", process: true });
+        done.push(r.id);
       } catch (e) { setToast(errorMessage(e)); }
     }
+    if (done.length) native.markRecordingsSubmitted(done).catch(() => {});
     refreshMeetings();
   };
 
@@ -301,9 +316,9 @@ export default function App() {
       {engine.state === "ready" && onboarded && <CommandPalette open={palette} onClose={() => setPalette(false)} meetings={meetings ?? []} />}
       <UpdateDialog />
       {onboarded && <PermissionsReminder />}
-      <Dialog open={unfinished.length > 0} onClose={() => recover(false)} title="Recover unfinished recording?"
-        footer={<><Button onClick={() => recover(false)}>Discard</Button><Button variant="primary" onClick={() => recover(true)}>Recover and process</Button></>}>
-        Huddle closed while {unfinished.length === 1 ? "a recording was" : `${unfinished.length} recordings were`} in progress. The audio up to the last second was saved to disk and can be processed now, or discarded for good.
+      <Dialog open={unfinished.length > 0} onClose={() => recover("later")} title={unfinished.length === 1 ? "Recover unfinished recording?" : `Recover ${unfinished.length} unfinished recordings?`}
+        footer={<><Button variant="ghost" onClick={() => recover("no")}>No</Button><Button onClick={() => recover("later")}>Later</Button><Button variant="primary" onClick={() => recover("yes")}>Yes</Button></>}>
+        Huddle closed during a recording. No deletes the audio.
       </Dialog>
     </NavContext.Provider>
   );

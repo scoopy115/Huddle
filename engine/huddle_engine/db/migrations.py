@@ -278,6 +278,25 @@ MIGRATIONS.append((7, """
     CREATE INDEX idx_meetings_project ON meetings(project_id);
     """))
 
+MIGRATIONS.append((8, """
+    -- Notes style: 'meeting' (summary, topics, decisions) or 'interview' (summary + every
+    -- question with its answer). Chosen when the recording starts; changeable afterwards.
+    ALTER TABLE meetings ADD COLUMN mode TEXT NOT NULL DEFAULT 'meeting';
+    CREATE TABLE interview_questions (
+        id             INTEGER PRIMARY KEY AUTOINCREMENT,
+        meeting_id     TEXT NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
+        position       INTEGER NOT NULL,
+        question       TEXT NOT NULL,
+        answer         TEXT NOT NULL DEFAULT '',
+        asked_by       TEXT,
+        answered_by    TEXT,
+        evidence_start REAL,
+        evidence_end   REAL,
+        segment_id     INTEGER REFERENCES transcript_segments(id) ON DELETE SET NULL
+    );
+    CREATE INDEX idx_interview_questions_meeting ON interview_questions(meeting_id, position);
+    """))
+
 LATEST_VERSION = MIGRATIONS[-1][0]
 
 

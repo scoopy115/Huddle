@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { Download, FileAudio, Folder, Languages, RotateCw, Sparkles, Trash2 } from "lucide-react";
+import { Download, FileAudio, Folder, Languages, MessageCircleQuestion, RotateCw, Sparkles, Trash2 } from "lucide-react";
 import { save } from "@tauri-apps/plugin-dialog";
 import { api, errorMessage } from "@/lib/api";
 import { native } from "@/lib/native";
@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils";
 import { AI_MISSING_HINT, useNav } from "@/lib/nav";
 import { Button, DangerDialog, Dialog, Select } from "@/components/ui";
 import { ProjectPicker } from "@/components/ProjectPicker";
+import type { MeetingMode } from "@/types/engine";
 
 /** The subset of a meeting the actions need — satisfied by both the list item and the detail. */
 export interface MenuMeeting {
@@ -17,13 +18,21 @@ export interface MenuMeeting {
   languageOverride: string | null;
   speakerCountHint?: number | null;
   projectId?: string | null;
+  mode?: MeetingMode;
 }
+
+/** Notes styles a recording can be summarised in. */
+export const MODE_OPTIONS: { value: MeetingMode; label: string; hint: string }[] = [
+  { value: "meeting", label: "Meeting", hint: "Summary, topics, decisions and action items." },
+  { value: "interview", label: "Interview", hint: "Summary plus every question with its complete answer." },
+];
+export const modeLabel = (m: MeetingMode | undefined) => MODE_OPTIONS.find((o) => o.value === m)?.label ?? "Meeting";
 
 /** Options for the "how many people spoke" hint: 0 = let the diarizer decide. */
 export const SPEAKER_COUNT_OPTIONS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
 export const speakerCountLabel = (n: number) => (n === 0 ? "Detect automatically" : n === 1 ? "1 person" : `${n} people`);
 
-export type MeetingAction = "export-md" | "export-txt" | "export-json" | "export-srt" | "export-audio" | "project" | "language" | "summary" | "reprocess" | "delete";
+export type MeetingAction = "export-md" | "export-txt" | "export-json" | "export-srt" | "export-audio" | "project" | "language" | "mode" | "summary" | "reprocess" | "delete";
 
 /**
  * Everything the "…" menu on a meeting can do — shared by the detail page and the
@@ -32,9 +41,10 @@ export type MeetingAction = "export-md" | "export-txt" | "export-json" | "export
  */
 export function useMeetingActions({ onChanged, onDeleted }: { onChanged: (m: MenuMeeting) => void; onDeleted?: (m: MenuMeeting) => void }) {
   const [target, setTarget] = useState<MenuMeeting | null>(null);
-  const [dialog, setDialog] = useState<"language" | "reprocess" | "delete" | "project" | null>(null);
+  const [dialog, setDialog] = useState<"language" | "mode" | "reprocess" | "delete" | "project" | null>(null);
   const [langChoice, setLangChoice] = useState("");
   const [countChoice, setCountChoice] = useState(0);
+  const [modeChoice, setModeChoice] = useState<MeetingMode>("meeting");
   const [error, setError] = useState<string | null>(null);
 
   const exportAs = async (m: MenuMeeting, format: "md" | "txt" | "json" | "srt") => {
@@ -68,6 +78,10 @@ export function useMeetingActions({ onChanged, onDeleted }: { onChanged: (m: Men
           setLangChoice(m.languageOverride ?? (m.language ?? "").split(",")[0] ?? "");
           setDialog("language");
           break;
+        case "mode":
+          setModeChoice(m.mode ?? "meeting");
+          setDialog("mode");
+          break;
         case "summary":
           await api.retryStage(m.id, "summarizing");
           onChanged(m);
@@ -75,6 +89,7 @@ export function useMeetingActions({ onChanged, onDeleted }: { onChanged: (m: Men
         case "reprocess":
           setLangChoice(m.languageOverride ?? "");
           setCountChoice(m.speakerCountHint ?? 0);
+          setModeChoice(m.mode ?? "meeting");
           setDialog("reprocess");
           break;
         case "delete":
@@ -92,12 +107,18 @@ export function useMeetingActions({ onChanged, onDeleted }: { onChanged: (m: Men
     </Select>
   );
 
+  const modeSelect = (
+    <Select wide className="mt-1" value={modeChoice} onChange={(e) => setModeChoice(e.target.value as MeetingMode)}>
+      {MODE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+    </Select>
+  );
+
   const dialogs: ReactNode = target && (
     <>
       <ProjectPicker open={dialog === "project"} onClose={close} currentId={target.projectId ?? null}
         onPick={async (pid) => { await api.setMeetingProject(target.id, pid); onChanged(target); }} />
       <Dialog open={dialog === "reprocess"} onClose={close} title="Reprocess meeting"
-        footer={<><Button variant="ghost" onClick={close}>Cancel</Button><Button variant="primary" onClick={async () => { close(); try { await api.process(target.id, { languageOverride: langChoice, speakerCount: countChoice }); onChanged(target); } catch (e) { setError(errorMessage(e)); } }}>Start</Button></>}>
+        footer={<><Button variant="ghost" onClick={close}>Cancel</Button><Button variant="primary" onClick={async () => { close(); try { await api.process(target.id, { languageOverride: langChoice, speakerCount: countChoice, mode: modeChoice }); onChanged(target); } catch (e) { setError(errorMessage(e)); } }}>Start</Button></>}>
         <p className="mb-3 text-muted">Transcript, speakers and notes are generated again. The current version stays until each step has finished, so you can cancel at any time and keep what you have.</p>
         <label className="block text-[12px] text-muted">Spoken language</label>
         {langSelect}
@@ -106,6 +127,16 @@ export function useMeetingActions({ onChanged, onDeleted }: { onChanged: (m: Men
           {SPEAKER_COUNT_OPTIONS.map((n) => <option key={n} value={n}>{speakerCountLabel(n)}</option>)}
         </Select>
         <p className="mt-1 text-[11.5px] text-muted">Telling Huddle the number of people makes speaker separation noticeably more reliable.</p>
+        <label className="mt-3 block text-[12px] text-muted">Notes style</label>
+        {modeSelect}
+        <p className="mt-1 text-[11.5px] text-muted">{MODE_OPTIONS.find((o) => o.value === modeChoice)?.hint}</p>
+      </Dialog>
+
+      <Dialog open={dialog === "mode"} onClose={close} title="Notes style"
+        footer={<><Button variant="ghost" onClick={close}>Cancel</Button><Button variant="primary" disabled={modeChoice === (target.mode ?? "meeting")} onClick={async () => { close(); try { await api.updateMeeting(target.id, { mode: modeChoice }); onChanged(target); } catch (e) { setError(errorMessage(e)); } }}>Rewrite notes</Button></>}>
+        <p className="mb-2 text-muted">The transcript stays as it is; only the notes are written again.</p>
+        {modeSelect}
+        <p className="mt-1 text-[11.5px] text-muted">{MODE_OPTIONS.find((o) => o.value === modeChoice)?.hint}</p>
       </Dialog>
 
       <Dialog open={dialog === "language"} onClose={close} title="Spoken language"
@@ -140,6 +171,7 @@ export function MeetingMenuList({ onPick }: { onPick: (a: MeetingAction) => void
       <div className="my-1 border-t border-border" />
       <button className={ITEM} onClick={() => onPick("project")}><Folder className="h-3.5 w-3.5 text-muted" /> Move to project…</button>
       <button className={ITEM} onClick={() => onPick("language")}><Languages className="h-3.5 w-3.5 text-muted" /> Change spoken language…</button>
+      <button className={ITEM} onClick={() => onPick("mode")}><MessageCircleQuestion className="h-3.5 w-3.5 text-muted" /> Notes style…</button>
       <button className={cn(ITEM, !ai.ready && "cursor-not-allowed opacity-45 hover:bg-transparent")} disabled={!ai.ready} title={ai.ready ? undefined : AI_MISSING_HINT} onClick={() => onPick("summary")}><Sparkles className="h-3.5 w-3.5 text-muted" /> Regenerate summary</button>
       <button className={ITEM} onClick={() => onPick("reprocess")}><RotateCw className="h-3.5 w-3.5 text-muted" /> Reprocess meeting…</button>
       <div className="my-1 border-t border-border" />
@@ -156,7 +188,7 @@ export function MeetingContextMenu({ position, onClose, onPick }: { position: { 
     window.addEventListener("scroll", onClose, true);
     return () => { window.removeEventListener("keydown", onKey); window.removeEventListener("scroll", onClose, true); };
   }, [onClose]);
-  const W = 220, H = 330;
+  const W = 220, H = 360;
   const x = Math.min(position.x, window.innerWidth - W - 8);
   const y = Math.min(position.y, window.innerHeight - H - 8);
   return (

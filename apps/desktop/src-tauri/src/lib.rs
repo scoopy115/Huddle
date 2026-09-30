@@ -148,6 +148,7 @@ pub fn run() {
             recording::list_unfinished_recordings,
             recording::take_pending_recordings,
             recording::discard_unfinished_recordings,
+            recording::mark_recordings_submitted,
             shell_prefs::get_shell_prefs,
             shell_prefs::set_shell_prefs,
             files::copy_file,

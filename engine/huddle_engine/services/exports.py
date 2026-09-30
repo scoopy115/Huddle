@@ -73,6 +73,12 @@ def to_markdown(d) -> str:
         lines += ["**Participants:** " + ", ".join(names), ""]
     if d.summary and d.summary.summary:
         lines += ["## Summary", "", d.summary.summary, ""]
+    if d.questions:
+        lines += ["## Questions", ""]
+        for q in d.questions:
+            ev = f" `{_clock(q.evidence_start)}`" if q.evidence_start is not None else ""
+            who = f" — {q.answered_by}" if q.answered_by else ""
+            lines += [f"### {q.question}{ev}", "", (q.answer or "_No answer given._") + who, ""]
     if d.topics:
         lines += ["## Topics", ""] + [f"- **{t.title}**" + (f" — {t.summary}" if t.summary else "") for t in d.topics] + [""]
     if d.decisions:

@@ -14,6 +14,9 @@ class Schema(BaseModel):
 
 
 MeetingStatus = Literal["recording", "saved", "processing", "ready", "failed"]
+# Notes style. "meeting": summary, topics, decisions. "interview": summary + every question with its answer.
+MeetingMode = Literal["meeting", "interview"]
+MODES: tuple[str, ...] = ("meeting", "interview")
 StageName = Literal["preprocessing", "transcribing", "diarizing", "identifying_speakers",
                     "summarizing", "indexing"]
 STAGES: list[str] = ["preprocessing", "transcribing", "diarizing", "identifying_speakers", "refining",
@@ -89,6 +92,21 @@ class Topic(Schema):
     summary: str = ""
 
 
+class InterviewQuestion(Schema):
+    """One question asked in an interview with the interviewee's complete answer, gathered from
+    everywhere in the conversation it was answered (follow-ups, later references)."""
+    id: int
+    meeting_id: str
+    position: int
+    question: str
+    answer: str = ""
+    asked_by: str | None = None
+    answered_by: str | None = None
+    evidence_start: float | None = None
+    evidence_end: float | None = None
+    segment_id: int | None = None
+
+
 class Decision(Schema):
     id: int
     meeting_id: str
@@ -156,6 +174,7 @@ class Meeting(Schema):
     language_override: str | None = None
     speaker_count_hint: int | None = None
     context_html: str | None = None         # user feedback/context for the notes (rich text)
+    mode: MeetingMode = "meeting"
     status: MeetingStatus
     source: str
     notes: str | None = None
@@ -216,6 +235,7 @@ class MeetingDetail(Schema):
     segments: list[TranscriptSegment]
     summary: Summary | None
     topics: list[Topic]
+    questions: list[InterviewQuestion] = Field(default_factory=list)   # interview mode only
     decisions: list[Decision]
     action_items: list[ActionItem]
     job: ProcessingJob | None
@@ -235,6 +255,7 @@ class CreateFromRecordingRequest(Schema):
     title: str | None = None
     language: str | None = None             # spoken language chosen when the recording started
     speaker_count: int | None = None        # "N people spoke" hint for speaker separation
+    mode: MeetingMode = "meeting"
     source: str = "recorded"
     process: bool = True
 
@@ -242,6 +263,7 @@ class CreateFromRecordingRequest(Schema):
 class ImportRequest(Schema):
     path: str
     title: str | None = None
+    mode: MeetingMode = "meeting"
 
 
 class RefineRequest(Schema):
@@ -253,6 +275,7 @@ class UpdateMeetingRequest(Schema):
     notes: str | None = None
     language_override: str | None = None    # "" clears
     speaker_count_hint: int | None = None   # 0 clears
+    mode: MeetingMode | None = None         # changing it rewrites the notes
     project_id: str | None = None           # "" clears (also dismisses a pending suggestion)
 
 

@@ -276,9 +276,12 @@ def list_meetings(q: str | None = None, limit: int = 500, project_id: str | None
 
 @app.post("/meetings/from-recording")
 def from_recording(req: CreateFromRecordingRequest):
+    """Idempotent: a recording that already became a meeting (e.g. recovered twice) is returned
+    as it is — processing it again would overwrite renames and edited notes."""
     c = ctx()
-    if not c.db.one("SELECT 1 FROM meetings WHERE id = ?", (req.id,)):
-        ms.create_from_recording(c.db, c.cfg, req)
+    if c.db.one("SELECT 1 FROM meetings WHERE id = ?", (req.id,)):
+        return ms.get_meeting(c.db, req.id).model_dump(by_alias=True)
+    ms.create_from_recording(c.db, c.cfg, req)
     if req.process:
         c.jobs.enqueue(req.id)
     return ms.get_meeting(c.db, req.id).model_dump(by_alias=True)
@@ -288,7 +291,7 @@ def from_recording(req: CreateFromRecordingRequest):
 def import_meeting(req: ImportRequest):
     c = ctx()
     try:
-        m = ms.import_file(c.db, c.cfg, req.path, req.title)
+        m = ms.import_file(c.db, c.cfg, req.path, req.title, mode=req.mode)
     except (FileNotFoundError, ValueError) as e:
         raise HTTPException(400, str(e))
     c.jobs.enqueue(m.id)
@@ -319,15 +322,21 @@ def update_meeting(meeting_id: str, req: UpdateMeetingRequest):
     if not ms.get_meeting(c.db, meeting_id):
         raise _404()
     try:
+        before = ms.get_meeting(c.db, meeting_id)
         m = ms.update_meeting(c.db, meeting_id, title=req.title, notes=req.notes, language_override=req.language_override,
-                              speaker_count_hint=req.speaker_count_hint, project_id=req.project_id)
+                              speaker_count_hint=req.speaker_count_hint, project_id=req.project_id, mode=req.mode)
     except KeyError:
         raise _404("Project")
+    except ValueError as e:
+        raise HTTPException(400, str(e))
     if not m:
         raise _404()
     if req.language_override is not None:
         # a different spoken language means the transcript (and everything after it) must be redone
         c.jobs.retry_stage(meeting_id, "transcribing")
+    elif req.mode is not None and before and req.mode != before.mode:
+        # a different notes style only needs the notes rewritten
+        c.jobs.retry_stage(meeting_id, "summarizing")
     return ms.get_meeting(c.db, meeting_id).model_dump(by_alias=True)
 
 
@@ -389,7 +398,7 @@ def delete_audio(meeting_id: str):
 
 @app.post("/meetings/{meeting_id}/process")
 def process(meeting_id: str, body: dict | None = None):
-    """Reprocess. Optional body: {"languageOverride": "nl" | "" (auto), "speakerCount": 2 | 0 (auto)}.
+    """Reprocess. Optional body: {"languageOverride": "nl" | "" (auto), "speakerCount": 2 | 0 (auto), "mode": "meeting" | "interview"}.
     The previous transcript and notes stay until each stage finishes, so cancelling keeps the old version."""
     c = ctx()
     if not ms.get_meeting(c.db, meeting_id):
@@ -398,6 +407,11 @@ def process(meeting_id: str, body: dict | None = None):
         ms.update_meeting(c.db, meeting_id, language_override=str(body.get("languageOverride") or ""))
     if body and "speakerCount" in body:
         ms.update_meeting(c.db, meeting_id, speaker_count_hint=int(body.get("speakerCount") or 0))
+    if body and body.get("mode"):
+        try:
+            ms.update_meeting(c.db, meeting_id, mode=str(body["mode"]))
+        except ValueError as e:
+            raise HTTPException(400, str(e))
     c.jobs.enqueue(meeting_id)
     return ms.get_job(c.db, meeting_id).model_dump(by_alias=True)
 

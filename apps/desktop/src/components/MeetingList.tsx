@@ -1,4 +1,4 @@
-import { CheckSquare, ChevronRight, Clock, Folder, Timer, Users } from "lucide-react";
+import { CheckSquare, ChevronRight, Clock, Folder, MessageCircleQuestion, Timer, Users } from "lucide-react";
 import type { Meeting } from "@/types/engine";
 import { fmtClock, fmtDuration, fmtRelativeDay } from "@/lib/format";
 import { cn, speakerColor } from "@/lib/utils";
@@ -56,6 +56,7 @@ export function MeetingRow({ m, active, showProject = true, onOpen, onContextMen
           {statusBadge(m)}
           {m.status === "ready" && m.jobError && <Badge tone="warn">{STAGE_FAIL[m.jobError] ?? "A step failed"}</Badge>}
           {showProject && m.projectName && <Badge title={`Project: ${m.projectName}`}><Folder className="h-3 w-3" />{m.projectName}</Badge>}
+          {m.mode === "interview" && <Badge title="Interview notes: every question with its answer"><MessageCircleQuestion className="h-3 w-3" />Interview</Badge>}
         </div>
         <div className="mt-1 flex flex-wrap items-center gap-x-3.5 gap-y-0.5 text-[12px] text-muted">
           <span className="inline-flex items-center gap-1"><Clock className="h-3 w-3" />{fmtClock(m.startedAt)}</span>

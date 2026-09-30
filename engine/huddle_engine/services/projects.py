@@ -152,6 +152,8 @@ def _meeting_text(db: Database, meeting_id: str, transcript_chars: int = 6000) -
         parts.append(s["summary"])
     for r in db.query("SELECT title, summary FROM topics WHERE meeting_id = ? ORDER BY position", (meeting_id,)):
         parts.append(f"{r['title']}. {r['summary']}")
+    for r in db.query("SELECT question, answer FROM interview_questions WHERE meeting_id = ? ORDER BY position", (meeting_id,)):
+        parts.append(f"{r['question']} {r['answer']}")
     for r in db.query("SELECT text FROM decisions WHERE meeting_id = ? ORDER BY position", (meeting_id,)):
         parts.append(r["text"])
     words, n = [], 0
@@ -173,6 +175,8 @@ def _project_text(db: Database, project: Project, per_meeting_chars: int = 500) 
             parts.append(r["summary"][:per_meeting_chars])
         for t in db.query("SELECT title FROM topics WHERE meeting_id = ? ORDER BY position LIMIT 8", (r["id"],)):
             parts.append(t["title"])
+        for t in db.query("SELECT question FROM interview_questions WHERE meeting_id = ? ORDER BY position LIMIT 8", (r["id"],)):
+            parts.append(t["question"])
     return "\n".join(p for p in parts if p)
 
 

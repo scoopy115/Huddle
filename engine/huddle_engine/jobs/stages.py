@@ -347,7 +347,7 @@ def summarizing(ctx: StageContext) -> str:
                       language_hint=(meeting.language or "").replace(",", " + ") or None,
                       notes_language=resolve_notes_language(ctx.settings),
                       include_actions=bool(ctx.settings.get("notes.autoActionItems", False)),
-                      user_context=html_to_text(meeting.context_html))
+                      user_context=html_to_text(meeting.context_html), mode=meeting.mode)
 
     ctx.report(0.9)
     ctx.check_cancelled()
@@ -366,6 +366,12 @@ def summarizing(ctx: StageContext) -> str:
         c.execute("DELETE FROM topics WHERE meeting_id = ?", (ctx.meeting_id,))
         c.executemany("INSERT INTO topics(meeting_id, position, title, summary) VALUES (?,?,?,?)",
                       [(ctx.meeting_id, i, t.title, t.summary) for i, t in enumerate(notes.topics)])
+        c.execute("DELETE FROM interview_questions WHERE meeting_id = ?", (ctx.meeting_id,))
+        c.executemany("INSERT INTO interview_questions(meeting_id, position, question, answer, asked_by, answered_by,"
+                      " evidence_start, evidence_end, segment_id) VALUES (?,?,?,?,?,?,?,?,?)",
+                      [(ctx.meeting_id, i, q.question, q.answer, q.asked_by, q.answered_by, q.evidence.start, q.evidence.end,
+                        seg_ids[q.evidence.segment_idx] if q.evidence.segment_idx is not None else None)
+                       for i, q in enumerate(notes.questions)])
         c.execute("DELETE FROM decisions WHERE meeting_id = ?", (ctx.meeting_id,))
         c.executemany("INSERT INTO decisions(meeting_id, position, text, evidence_start, evidence_end, segment_id)"
                       " VALUES (?,?,?,?,?,?)",

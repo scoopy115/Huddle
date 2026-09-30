@@ -11,9 +11,11 @@ from pathlib import Path
 from ..audio import SUPPORTED_EXT
 from ..db import Database
 from ..schemas import (
+    MODES,
     ActionItem,
     CreateFromRecordingRequest,
     Decision,
+    InterviewQuestion,
     Meeting,
     MeetingDetail,
     ProcessingJob,
@@ -56,6 +58,7 @@ def _row_meeting(r, extras: dict | None = None) -> Meeting:
                    language_override=r["language_override"] if "language_override" in keys else None,
                    speaker_count_hint=r["speaker_count_hint"] if "speaker_count_hint" in keys else None,
                    context_html=r["context_html"] if "context_html" in keys else None,
+                   mode=(r["mode"] if "mode" in keys and r["mode"] in MODES else "meeting"),
                    status=r["status"], source=r["source"], notes=r["notes"],
                    project_id=r["project_id"] if "project_id" in keys else None,
                    project_name=e.get("project_name"),
@@ -84,10 +87,10 @@ def create_from_recording(db: Database, cfg: EngineConfig, req: CreateFromRecord
     size = path.stat().st_size if path.exists() else None
     with db.tx() as c:
         c.execute("INSERT INTO meetings(id,title,created_at,started_at,ended_at,duration_sec,status,source,language_override,"
-                  "speaker_count_hint) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                  "speaker_count_hint,mode) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
                   (req.id, req.title or default_title(started), now, started, started + req.duration_sec,
                    req.duration_sec, "saved", req.source, (req.language or None) if req.language != "auto" else None,
-                   req.speaker_count or None))
+                   req.speaker_count or None, req.mode if req.mode in MODES else "meeting"))
         c.execute("INSERT INTO recordings(id,meeting_id,file_path,system_file_path,format,sample_rate,channels,duration_sec,"
                   "size_bytes,input_device,started_at,status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
                   (f"rec-{req.id}", req.id, str(path), req.system_file_path, req.format, req.sample_rate, req.channels,
@@ -95,7 +98,7 @@ def create_from_recording(db: Database, cfg: EngineConfig, req: CreateFromRecord
     return get_meeting(db, req.id)
 
 
-def import_file(db: Database, cfg: EngineConfig, src: str, title: str | None) -> Meeting:
+def import_file(db: Database, cfg: EngineConfig, src: str, title: str | None, mode: str = "meeting") -> Meeting:
     p = Path(src).expanduser()
     if not p.exists():
         raise FileNotFoundError(f"File not found: {src}")
@@ -105,7 +108,8 @@ def import_file(db: Database, cfg: EngineConfig, src: str, title: str | None) ->
     started = p.stat().st_mtime
     (cfg.recordings_dir / mid).mkdir(parents=True, exist_ok=True)
     req = CreateFromRecordingRequest(id=mid, file_path=str(p), started_at=started, duration_sec=0.0,
-                                     format=p.suffix.lstrip(".").lower(), title=title or p.stem, source="imported")
+                                     format=p.suffix.lstrip(".").lower(), title=title or p.stem, source="imported",
+                                     mode=mode if mode in MODES else "meeting")
     return create_from_recording(db, cfg, req)
 
 
@@ -199,6 +203,13 @@ def get_topics(db: Database, meeting_id: str) -> list[Topic]:
             for r in db.query("SELECT * FROM topics WHERE meeting_id = ? ORDER BY position", (meeting_id,))]
 
 
+def get_questions(db: Database, meeting_id: str) -> list[InterviewQuestion]:
+    return [InterviewQuestion(id=r["id"], meeting_id=r["meeting_id"], position=r["position"], question=r["question"],
+                              answer=r["answer"], asked_by=r["asked_by"], answered_by=r["answered_by"],
+                              evidence_start=r["evidence_start"], evidence_end=r["evidence_end"], segment_id=r["segment_id"])
+            for r in db.query("SELECT * FROM interview_questions WHERE meeting_id = ? ORDER BY position", (meeting_id,))]
+
+
 def get_decisions(db: Database, meeting_id: str) -> list[Decision]:
     return [Decision(id=r["id"], meeting_id=r["meeting_id"], position=r["position"], text=r["text"],
                      evidence_start=r["evidence_start"], evidence_end=r["evidence_end"], segment_id=r["segment_id"])
@@ -218,13 +229,15 @@ def get_detail(db: Database, meeting_id: str) -> MeetingDetail | None:
         return None
     return MeetingDetail(meeting=m, recording=get_recording(db, meeting_id), speakers=transcripts.speakers(db, meeting_id),
                          segments=transcripts.segments(db, meeting_id), summary=get_summary(db, meeting_id),
-                         topics=get_topics(db, meeting_id), decisions=get_decisions(db, meeting_id),
+                         topics=get_topics(db, meeting_id), questions=get_questions(db, meeting_id),
+                         decisions=get_decisions(db, meeting_id),
                          action_items=get_action_items(db, meeting_id), job=get_job(db, meeting_id))
 
 
 def update_meeting(db: Database, meeting_id: str, title: str | None = None, notes: str | None = None,
                    language_override: str | None = None, speaker_count_hint: int | None = None,
-                   context_html: str | None = None, project_id: str | None = None) -> Meeting | None:
+                   context_html: str | None = None, project_id: str | None = None,
+                   mode: str | None = None) -> Meeting | None:
     if project_id is not None:
         from . import projects
         projects.assign(db, meeting_id, project_id.strip() or None)
@@ -244,6 +257,11 @@ def update_meeting(db: Database, meeting_id: str, title: str | None = None, note
     if language_override is not None:
         sets.append("language_override = ?")
         args.append(language_override.strip() or None)
+    if mode is not None:
+        if mode not in MODES:
+            raise ValueError(f"Unknown mode '{mode}'")
+        sets.append("mode = ?")
+        args.append(mode)
     if sets:
         db.execute(f"UPDATE meetings SET {', '.join(sets)} WHERE id = ?", (*args, meeting_id))
     return get_meeting(db, meeting_id)

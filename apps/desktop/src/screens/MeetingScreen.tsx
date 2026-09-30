@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowLeft, Calendar, CalendarClock, Check, CheckCircle2, Circle, Clock, Folder, Languages, MessageSquareText, MoreHorizontal, Pencil, Plus, Sparkles, Timer, Trash2, User, Wand2, X } from "lucide-react";
+import { ArrowLeft, Calendar, CalendarClock, Check, CheckCircle2, Circle, Clock, Folder, Languages, MessageCircleQuestion, MessageSquareText, MoreHorizontal, Pencil, Plus, Sparkles, Timer, Trash2, User, Wand2, X } from "lucide-react";
 import { RichTextEditor } from "@/components/RichTextEditor";
 import { api, errorMessage } from "@/lib/api";
 import type { ActionItem, AskResult, MeetingDetail, MeetingSpeaker } from "@/types/engine";
@@ -9,7 +9,7 @@ import { cn, speakerColor } from "@/lib/utils";
 import { AudioPlayer, type PlayerHandle } from "@/components/AudioPlayer";
 import { ProcessingStatus } from "@/components/ProcessingStatus";
 import { TranscriptView, speakerDisplay } from "@/components/TranscriptView";
-import { MeetingMenuList, useMeetingActions } from "@/components/MeetingMenu";
+import { MeetingMenuList, modeLabel, useMeetingActions } from "@/components/MeetingMenu";
 import { ProjectPicker } from "@/components/ProjectPicker";
 import { Badge, Button, Dialog, Input, SectionTitle, Spinner } from "@/components/ui";
 
@@ -146,6 +146,7 @@ export function MeetingScreen({ id, seek, segmentId, nonce, onChanged }: { id: s
             <span className="inline-flex items-center gap-1.5"><Clock className="h-3.5 w-3.5" />{fmtClock(m.startedAt)}</span>
             {m.durationSec ? <span className="inline-flex items-center gap-1.5"><Timer className="h-3.5 w-3.5" />{fmtDuration(m.durationSec)}</span> : null}
             {m.language && <button className="inline-flex items-center gap-1.5 hover:text-fg" title="Wrong language? Click to change" onClick={() => actions.run("language", m)}><Languages className="h-3.5 w-3.5" />{langLabel(m.language)}</button>}
+            <button className="inline-flex items-center gap-1.5 hover:text-fg" title="Notes style — click to change" onClick={() => actions.run("mode", m)}><MessageCircleQuestion className="h-3.5 w-3.5" />{modeLabel(m.mode)}</button>
             <button className={cn("inline-flex items-center gap-1.5 hover:text-fg", m.projectId && "text-fg/80")} title={m.projectId ? "Click to move to another project" : "Put this meeting in a project"} onClick={() => setPickProject(true)}>
               <Folder className="h-3.5 w-3.5" />{m.projectName ?? <span className="italic">No project</span>}
             </button>
@@ -240,6 +241,27 @@ export function MeetingScreen({ id, seek, segmentId, nonce, onChanged }: { id: s
                 <Button size="sm" variant="ghost" loading={refining} disabled={!ai.ready} title={ai.ready ? "Correct names, add context or ask for changes — Huddle fixes the transcript and rewrites the notes" : AI_MISSING_HINT} onClick={() => { setContextHtml(m.contextHtml ?? ""); setRefine(true); }}><Wand2 className="h-3.5 w-3.5" /> Refine notes</Button>
               </div>}>Summary</SectionTitle>
               <p className="selectable text-[14px] leading-[1.65] text-fg/90">{d.summary.summary || <span className="text-muted">No summary.</span>}</p>
+            </section>
+          )}
+
+          {d.questions.length > 0 && (
+            <section className="mt-7">
+              <SectionTitle right={<span className="text-[11px] text-muted">{d.questions.length} question{d.questions.length === 1 ? "" : "s"}</span>}>Questions</SectionTitle>
+              <ol className="selectable flex flex-col gap-4">
+                {d.questions.map((q, i) => (
+                  <li key={q.id} className="flex gap-3">
+                    <span className="mt-[2px] w-5 shrink-0 text-right font-mono text-[11px] text-muted">{i + 1}</span>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-start gap-2">
+                        <p className="flex-1 text-[14px] font-semibold leading-snug">{q.question}</p>
+                        {q.evidenceStart != null && <button className="mt-[2px] font-mono text-[11px] text-muted hover:text-accent" onClick={() => jump(q.evidenceStart, q.segmentId)}>{fmtTime(q.evidenceStart)}</button>}
+                      </div>
+                      <p className="mt-1 whitespace-pre-wrap text-[13.5px] leading-[1.6] text-fg/85">{q.answer || <span className="italic text-muted">No answer given.</span>}</p>
+                      {q.answeredBy && <div className="mt-1 text-[11.5px] text-muted">{q.answeredBy}</div>}
+                    </div>
+                  </li>
+                ))}
+              </ol>
             </section>
           )}
 

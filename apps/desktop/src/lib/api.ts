@@ -12,6 +12,7 @@ import type {
   McpStatus,
   ProcessesInfo,
   Meeting,
+  MeetingMode,
   MeetingDetail,
   MeetingSpeaker,
   ProcessingJob,
@@ -52,6 +53,7 @@ export interface RecordingSubmission {
   source?: "recorded" | "imported" | "recovered";
   process?: boolean;
   speakerCount?: number | null;
+  mode?: MeetingMode;
 }
 
 export const api = {
@@ -63,10 +65,10 @@ export const api = {
   getMeeting: (id: string) => get<MeetingDetail>(`/meetings/${id}`),
   createFromRecording: (r: RecordingSubmission) => post<Meeting>("/meetings/from-recording", r),
   importFile: (path: string, title?: string) => post<Meeting>("/meetings/import", { path, title }),
-  updateMeeting: (id: string, body: { title?: string; notes?: string; languageOverride?: string; speakerCountHint?: number; projectId?: string }) => patch<Meeting>(`/meetings/${id}`, body),
+  updateMeeting: (id: string, body: { title?: string; notes?: string; languageOverride?: string; speakerCountHint?: number; projectId?: string; mode?: MeetingMode }) => patch<Meeting>(`/meetings/${id}`, body),
   deleteMeeting: (id: string) => del<{ ok: boolean }>(`/meetings/${id}`),
   deleteAudio: (id: string) => post<{ freedBytes: number }>(`/meetings/${id}/delete-audio`),
-  process: (id: string, opts?: { languageOverride?: string; speakerCount?: number }) => post<ProcessingJob>(`/meetings/${id}/process`, opts),
+  process: (id: string, opts?: { languageOverride?: string; speakerCount?: number; mode?: MeetingMode }) => post<ProcessingJob>(`/meetings/${id}/process`, opts),
   cancelProcessing: (id: string) => post<{ ok: boolean }>(`/meetings/${id}/cancel`),
   processes: () => get<ProcessesInfo>("/processes"),
   retryStage: (id: string, stage: string) => post<ProcessingJob>(`/meetings/${id}/retry/${stage}`),

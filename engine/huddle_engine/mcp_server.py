@@ -98,7 +98,8 @@ def build_server(cfg: EngineConfig | None = None) -> FastMCP:
 
     @mcp.tool()
     def get_meeting(meeting_id: str) -> dict:
-        """Meeting header, participants, summary, topics, decisions and action items (no transcript)."""
+        """Meeting header, participants, summary, topics (or the questions and answers of an interview),
+        decisions and action items (no transcript)."""
         d = ms.get_detail(ctx.db, meeting_id)
         if not d:
             return {"error": "meeting not found"}
@@ -107,7 +108,10 @@ def build_server(cfg: EngineConfig | None = None) -> FastMCP:
             "speakers": [{"id": s.id, "name": s.display_name or s.speaker_name or s.label,
                           "talkTimeSec": round(s.talk_time_sec)} for s in d.speakers],
             "summary": d.summary.summary if d.summary else None,
+            "mode": d.meeting.mode,
             "topics": [{"title": t.title, "summary": t.summary} for t in d.topics],
+            "questions": [{"question": q.question, "answer": q.answer, "askedBy": q.asked_by, "answeredBy": q.answered_by,
+                           "timestamp": _fmt(q.evidence_start), "segmentId": q.segment_id} for q in d.questions],
             "decisions": [{"text": x.text, "timestamp": _fmt(x.evidence_start), "segmentId": x.segment_id,
                            "evidenceStart": x.evidence_start, "evidenceEnd": x.evidence_end} for x in d.decisions],
             "actionItems": [{"id": a.id, "text": a.text, "owner": a.owner, "dueDate": a.due_date, "done": a.done,
@@ -124,6 +128,14 @@ def build_server(cfg: EngineConfig | None = None) -> FastMCP:
     def get_topics(meeting_id: str) -> list[dict]:
         """Topics discussed in a meeting."""
         return [{"title": t.title, "summary": t.summary} for t in ms.get_topics(ctx.db, meeting_id)]
+
+    @mcp.tool()
+    def get_questions(meeting_id: str) -> list[dict]:
+        """Questions and answers of an interview (empty for meetings recorded in meeting mode)."""
+        return [{"question": q.question, "answer": q.answer, "askedBy": q.asked_by, "answeredBy": q.answered_by,
+                 "timestamp": _fmt(q.evidence_start), "meetingId": meeting_id, "segmentId": q.segment_id,
+                 "evidenceStart": q.evidence_start, "evidenceEnd": q.evidence_end}
+                for q in ms.get_questions(ctx.db, meeting_id)]
 
     @mcp.tool()
     def get_decisions(meeting_id: str) -> list[dict]:

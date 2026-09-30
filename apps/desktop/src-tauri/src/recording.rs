@@ -611,6 +611,26 @@ pub fn stop_for_exit(app: &AppHandle) {
     }
 }
 
+/// Recordings that became meetings: mark them handled so they are no longer offered for recovery.
+/// (Before 0.8.0 nothing did this, and a recovered recording was offered again on every launch.)
+#[tauri::command]
+pub fn mark_recordings_submitted(app: AppHandle, ids: Vec<String>) -> Result<(), String> {
+    let rec_dir = paths::data_dir(&app).map_err(|e| e.to_string())?.join("recordings");
+    for id in ids {
+        if id.is_empty() || id.contains(['/', '\\']) || id.starts_with('.') {
+            continue;
+        }
+        let dir = rec_dir.join(&id);
+        let Ok(raw) = std::fs::read(dir.join("recording.json")) else { continue };
+        let Ok(mut meta) = serde_json::from_slice::<RecordingMeta>(&raw) else { continue };
+        if meta.status == "recording" || meta.status == "unsubmitted" {
+            meta.status = "submitted".into();
+            write_meta(&dir, &meta).map_err(|e| e.to_string())?;
+        }
+    }
+    Ok(())
+}
+
 /// Delete unfinished recordings the user chose not to recover, so the prompt does not return.
 #[tauri::command]
 pub fn discard_unfinished_recordings(app: AppHandle, ids: Vec<String>) -> Result<(), String> {

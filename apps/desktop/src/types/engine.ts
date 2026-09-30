@@ -21,6 +21,9 @@ export const STAGES: StageName[] = [
   "indexing",
 ];
 
+/** Notes style: "meeting" = summary, topics, decisions; "interview" = summary + every question with its answer. */
+export type MeetingMode = "meeting" | "interview";
+
 export interface Meeting {
   id: string;
   title: string;
@@ -32,6 +35,7 @@ export interface Meeting {
   languageOverride: string | null;
   speakerCountHint: number | null;
   contextHtml: string | null;
+  mode: MeetingMode;
   status: MeetingStatus;
   source: string;
   notes: string | null;
@@ -135,6 +139,19 @@ export interface Topic {
   summary: string;
 }
 
+export interface InterviewQuestion {
+  id: number;
+  meetingId: string;
+  position: number;
+  question: string;
+  answer: string;
+  askedBy: string | null;
+  answeredBy: string | null;
+  evidenceStart: number | null;
+  evidenceEnd: number | null;
+  segmentId: number | null;
+}
+
 export interface Decision {
   id: number;
   meetingId: string;
@@ -199,6 +216,7 @@ export interface MeetingDetail {
   segments: TranscriptSegment[];
   summary: Summary | null;
   topics: Topic[];
+  questions: InterviewQuestion[];
   decisions: Decision[];
   actionItems: ActionItem[];
   job: ProcessingJob | null;
