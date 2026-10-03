@@ -146,3 +146,60 @@ def test_retry_downstream_expands(db, cfg):
     assert job.stages["diarizing"].status == "pending" and job.stages["identifying_speakers"].status == "pending"
     _mid, names = r._q.get_nowait()
     assert names == ["diarizing", "identifying_speakers", "summarizing"]
+
+
+def test_no_ai_model_skips_notes_and_keeps_the_transcript(db, cfg, monkeypatch):
+    """Without an AI model the summary is skipped — no keyword-picked stand-in — the job ends
+    ready, and the transcript stays readable and exportable."""
+    from huddle_engine.providers.llm import ExtractiveProvider
+    from huddle_engine.services import exports
+    _meeting(db, cfg)
+    with db.tx() as c:
+        sp = c.execute("INSERT INTO meeting_speakers(meeting_id,label) VALUES ('m1','Speaker 1')").lastrowid
+        c.execute("INSERT INTO transcript_segments(meeting_id,meeting_speaker_id,idx,start,\"end\",text) VALUES ('m1',?,0,0,2,?)",
+                  (sp, "We decided to launch the new homepage next Monday."))
+    monkeypatch.setattr(st, "_llm_provider", lambda ctx: (ExtractiveProvider(), None))
+    fakes = {n: (lambda ctx: "ok") for n in STAGES if n not in ("preprocessing", "summarizing")}
+    r = _runner(db, cfg, fakes)
+    try:
+        r.enqueue("m1")
+        r._run("m1", ["summarizing", "indexing"])
+    finally:
+        _restore()
+    job = ms.get_job(db, "m1")
+    assert job.stages["summarizing"].status == "skipped"
+    assert job.stages["summarizing"].detail == "Needs a local AI model"
+    assert job.state == "ready"
+    assert ms.get_summary(db, "m1") is None and ms.get_topics(db, "m1") == [] and ms.get_decisions(db, "m1") == []
+    body, _ = exports.export(db, "m1", "md")
+    assert "launch the new homepage" in body
+    # action items: the same, skipped rather than guessed
+    with __import__("pytest").raises(st.StageSkipped):
+        st.extracting_actions(st.StageContext(db=db, cfg=cfg, registry=None, settings={}, meeting_id="m1"))
+
+
+def test_migration_removes_fallback_notes(tmp_path):
+    """Schema 9 drops what the no-model fallback wrote; transcripts and ticked items stay."""
+    import sqlite3
+
+    from huddle_engine.db.migrations import MIGRATIONS, migrate
+    conn = sqlite3.connect(str(tmp_path / "h.db"))
+    for version, script in MIGRATIONS:
+        if version >= 9:
+            break
+        conn.executescript(f"BEGIN;\n{script}\nPRAGMA user_version = {version};\nCOMMIT;")
+    conn.executescript("""
+        INSERT INTO meetings(id,title,created_at,started_at,status,source) VALUES ('a','A',1,1,'ready','recorded'), ('b','B',1,1,'ready','recorded');
+        INSERT INTO transcript_segments(meeting_id,idx,start,"end",text) VALUES ('a',0,0,1,'hello'), ('b',0,0,1,'hi');
+        INSERT INTO summaries(meeting_id,summary,provider,created_at) VALUES ('a','keywords','extractive',1), ('b','real','ollama',1);
+        INSERT INTO topics(meeting_id,position,title) VALUES ('a',0,'x'), ('b',0,'y');
+        INSERT INTO decisions(meeting_id,position,text) VALUES ('a',0,'x'), ('b',0,'y');
+        INSERT INTO action_items(meeting_id,position,text,done,source,created_at) VALUES
+            ('a',0,'guess',0,'auto',1), ('a',1,'ticked',1,'auto',1), ('a',2,'mine',0,'manual',1), ('b',0,'real',0,'auto',1);
+    """)
+    assert migrate(conn) >= 9
+    q = lambda sql: [r[0] for r in conn.execute(sql)]  # noqa: E731
+    assert q("SELECT meeting_id FROM summaries") == ["b"]
+    assert q("SELECT meeting_id FROM topics") == ["b"] and q("SELECT meeting_id FROM decisions") == ["b"]
+    assert sorted(q("SELECT text FROM action_items")) == ["mine", "real", "ticked"]
+    assert q("SELECT COUNT(*) FROM transcript_segments") == [2]

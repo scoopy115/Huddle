@@ -297,6 +297,17 @@ MIGRATIONS.append((8, """
     CREATE INDEX idx_interview_questions_meeting ON interview_questions(meeting_id, position);
     """))
 
+MIGRATIONS.append((9, """
+    -- Notes are AI-only since 0.8.0: remove what the no-model fallback wrote (keyword-picked
+    -- sentences shown as a summary). Transcripts stay; action items someone ticked off stay.
+    DELETE FROM topics WHERE meeting_id IN (SELECT meeting_id FROM summaries WHERE provider = 'extractive');
+    DELETE FROM decisions WHERE meeting_id IN (SELECT meeting_id FROM summaries WHERE provider = 'extractive');
+    DELETE FROM interview_questions WHERE meeting_id IN (SELECT meeting_id FROM summaries WHERE provider = 'extractive');
+    DELETE FROM action_items WHERE source = 'auto' AND done = 0
+        AND meeting_id IN (SELECT meeting_id FROM summaries WHERE provider = 'extractive');
+    DELETE FROM summaries WHERE provider = 'extractive';
+    """))
+
 LATEST_VERSION = MIGRATIONS[-1][0]
 
 

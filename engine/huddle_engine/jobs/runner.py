@@ -159,6 +159,9 @@ class JobRunner:
             except JobCancelled:
                 self._cancelled_cleanup(meeting_id, stages, name)
                 return
+            except st.StageSkipped as e:
+                stages[name].update(status="skipped", finished_at=time.time(), detail=str(e), progress=None)
+                log.info("[%s] %s skipped — %s", meeting_id, name, e)
             except ProviderError as e:
                 stages[name].update(status="failed", finished_at=time.time(), error=str(e), error_detail=e.detail)
                 log.warning("[%s] %s failed: %s", meeting_id, name, e)

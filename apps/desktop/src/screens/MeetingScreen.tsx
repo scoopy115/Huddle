@@ -17,7 +17,7 @@ const langLabel = (code: string | null) =>
   (code ?? "").split(",").filter(Boolean).map((c) => languageName(c)).join(", ");
 
 export function MeetingScreen({ id, seek, segmentId, nonce, onChanged }: { id: string; seek?: number; segmentId?: number; nonce?: number; onChanged: () => void }) {
-  const { back, ai } = useNav();
+  const { go, back, ai } = useNav();
   const [d, setD] = useState<MeetingDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [time, setTime] = useState(0);
@@ -234,10 +234,25 @@ export function MeetingScreen({ id, seek, segmentId, nonce, onChanged }: { id: s
               )}
             </section>
           )}
+          {!d.summary && d.segments.length > 0 && !processing && (
+            <section className="mt-7">
+              <SectionTitle>Summary</SectionTitle>
+              {ai.ready ? (
+                <div className="flex items-center gap-3 text-[13px] text-muted">
+                  No summary yet.
+                  <Button size="sm" variant="secondary" onClick={() => retry("summarizing")}><Sparkles className="h-3.5 w-3.5" /> Create summary</Button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-3 rounded-lg border border-border bg-fg/[0.03] px-3 py-2.5 text-[13px] text-muted">
+                  <span className="flex-1">Summary, topics and decisions need a local AI model.</span>
+                  <Button size="sm" variant="secondary" onClick={() => go({ kind: "settings", section: "models:summaries" })}>Open Models</Button>
+                </div>
+              )}
+            </section>
+          )}
           {d.summary && (
             <section className="mt-7">
               <SectionTitle right={<div className="flex items-center gap-2">
-                {d.summary.provider === "extractive" && <span className="text-[11px] text-muted">Built-in notes · set up an AI model under Settings → Models for better summaries</span>}
                 <Button size="sm" variant="ghost" loading={refining} disabled={!ai.ready} title={ai.ready ? "Correct names, add context or ask for changes — Huddle fixes the transcript and rewrites the notes" : AI_MISSING_HINT} onClick={() => { setContextHtml(m.contextHtml ?? ""); setRefine(true); }}><Wand2 className="h-3.5 w-3.5" /> Refine notes</Button>
               </div>}>Summary</SectionTitle>
               <p className="selectable text-[14px] leading-[1.65] text-fg/90">{d.summary.summary || <span className="text-muted">No summary.</span>}</p>
@@ -291,7 +306,7 @@ export function MeetingScreen({ id, seek, segmentId, nonce, onChanged }: { id: s
             </section>
           )}
 
-          {(d.actionItems.length > 0 || d.summary) && (
+          {(d.actionItems.length > 0 || d.summary || d.segments.length > 0) && (
             <section className="mt-7">
               <SectionTitle right={<div className="flex items-center gap-1">
                 <Button size="sm" variant="ghost" loading={generating || extracting} disabled={!ai.ready} title={ai.ready ? undefined : AI_MISSING_HINT} onClick={generateItems}><Sparkles className="h-3.5 w-3.5" /> {extracting ? "Reading the transcript…" : d.actionItems.length ? "Find again" : "Find action items"}</Button>

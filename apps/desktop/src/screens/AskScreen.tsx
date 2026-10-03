@@ -63,7 +63,7 @@ export function AskScreen({ meetings }: { meetings: Meeting[] }) {
           <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-fg/10 text-muted"><MessageSquareText className="h-6 w-6" /></div>
           <div className="font-display text-[17px] font-bold tracking-tight">Ask needs an AI model</div>
           <p className="max-w-md text-[13px] text-muted">{AI_MISSING_HINT} Transcripts and search keep working without one.</p>
-          <Button variant="primary" size="sm" onClick={() => go({ kind: "settings", section: "models" })}>Open Models</Button>
+          <Button variant="primary" size="sm" onClick={() => go({ kind: "settings", section: "models:summaries" })}>Open Models</Button>
         </div>
       </div>
     );

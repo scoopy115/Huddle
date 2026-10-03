@@ -29,7 +29,10 @@ const SECTIONS = [
 type Update = (p: Partial<UserSettings>) => Promise<void>;
 
 export function SettingsScreen({ section, engine }: { section?: string; engine: EngineStatus }) {
-  const [active, setActive] = useState(section ?? "general");
+  // "models:summaries" opens Models on the Summaries tab (e.g. from "needs an AI model" hints).
+  const [sectionId, modelsTab] = (section ?? "general").split(":") as [string, "transcript" | "summaries" | undefined];
+  const [active, setActive] = useState(sectionId);
+  useEffect(() => { setActive(sectionId); }, [sectionId, section]);
   const [settings, setSettings] = useState<UserSettings | null>(null);
   const [env, setEnv] = useState<Environment | null>(null);
   const [resolutions, setResolutions] = useState<Resolution[]>([]);
@@ -79,7 +82,7 @@ export function SettingsScreen({ section, engine }: { section?: string; engine: 
             <>
               {active === "general" && <General settings={settings} update={update} />}
               {active === "recording" && <Recording settings={settings} update={update} />}
-              {active === "models" && <Models settings={settings} env={env} resolutions={resolutions} update={update} reload={load} />}
+              {active === "models" && <Models settings={settings} env={env} resolutions={resolutions} update={update} reload={load} initialTab={modelsTab} />}
               {active === "speakers" && <Speakers settings={settings} update={update} />}
               {active === "privacy" && <Privacy settings={settings} update={update} />}
               {active === "mcp" && <McpSection settings={settings} update={update} />}
@@ -304,8 +307,9 @@ function Tab({ id, label, tab, setTab }: { id: "transcript" | "summaries"; label
   );
 }
 
-function Models({ settings, env, resolutions, update, reload }: { settings: UserSettings; env: Environment; resolutions: Resolution[]; update: Update; reload: () => Promise<void> }) {
-  const [tab, setTab] = useState<"transcript" | "summaries">("transcript");
+function Models({ settings, env, resolutions, update, reload, initialTab }: { settings: UserSettings; env: Environment; resolutions: Resolution[]; update: Update; reload: () => Promise<void>; initialTab?: "transcript" | "summaries" }) {
+  const [tab, setTab] = useState<"transcript" | "summaries">(initialTab ?? "transcript");
+  useEffect(() => { if (initialTab) setTab(initialTab); }, [initialTab]);
   const [cands, setCands] = useState<DownloadCandidate[]>([]);
   const [downloads, setDownloads] = useState<DownloadProgress[]>([]);
   const [confirm, setConfirm] = useState<LocalModel | null>(null);

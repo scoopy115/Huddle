@@ -59,6 +59,11 @@ class JobCancelled(Exception):
     """The meeting was deleted (or processing was cancelled) while a stage ran."""
 
 
+class StageSkipped(Exception):
+    """The stage cannot run on this Mac right now (e.g. no AI model); not an error. The message
+    becomes the stage detail and the stage is recorded as skipped."""
+
+
 def _processed_wav(ctx: StageContext) -> Path:
     rec = ms.get_recording(ctx.db, ctx.meeting_id)
     if not rec or rec.status == "audio_deleted":
@@ -340,6 +345,15 @@ def summarizing(ctx: StageContext) -> str:
     inferred = _apply_inferred_names(ctx, provider, plain)
     ctx.report(0.3)
     ctx.check_cancelled()
+    if isinstance(provider, ExtractiveProvider):
+        # No AI model: no notes at all rather than keyword-picked sentences dressed up as a
+        # summary. Existing notes are left untouched; the transcript stays as it is.
+        try:
+            from ..services import projects
+            projects.suggest(ctx.db, ctx.meeting_id, None)
+        except Exception:
+            log.exception("project suggestion failed")
+        raise StageSkipped("Needs a local AI model")
     names = transcripts.speaker_names(ctx.db, ctx.meeting_id)
     meeting = ms.get_meeting(ctx.db, ctx.meeting_id)
     date = datetime.fromtimestamp(meeting.started_at).strftime("%Y-%m-%d (%A)")
@@ -399,8 +413,6 @@ def summarizing(ctx: StageContext) -> str:
             extra += f" · looks like part of “{suggested.name}”"
     except Exception:
         log.exception("project suggestion failed")
-    if notes.provider == "extractive":
-        return "Built-in notes (no AI model in Ollama)" + extra
     return f"{res.model.name if res.model else notes.model}{extra}" + renamed
 
 
@@ -478,6 +490,8 @@ def extracting_actions(ctx: StageContext) -> str:
     if not segs:
         raise ProviderError("There is no transcript yet.")
     provider, _res = _llm_provider(ctx)
+    if isinstance(provider, ExtractiveProvider):
+        raise StageSkipped("Needs a local AI model")
     names = transcripts.speaker_names(ctx.db, ctx.meeting_id)
     meeting = ms.get_meeting(ctx.db, ctx.meeting_id)
     date = datetime.fromtimestamp(meeting.started_at).strftime("%Y-%m-%d (%A)")
