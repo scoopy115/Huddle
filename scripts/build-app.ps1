@@ -1,4 +1,4 @@
-# Build the Windows installer: Tauri release build (NSIS) with the bundled engine.
+﻿# Build the Windows installer: Tauri release build (NSIS) with the bundled engine.
 # Output: apps\desktop\src-tauri\target.nosync\release\bundle\nsis\Huddle_<version>_x64-setup.exe
 #
 #   powershell -ExecutionPolicy Bypass -File scripts\build-app.ps1
@@ -20,15 +20,17 @@ if ($newer) { throw "engine sources are newer than the built sidecar ($($newer.N
 if (-not (Test-Path (Join-Path $root "apps\desktop\src-tauri\resources\models\speaker\nemo_titanet_large.onnx"))) { throw "speaker models missing - run scripts\fetch-speaker-models.ps1 first" }
 
 Set-Location (Join-Path $root "apps\desktop")
-$args = @("tauri", "build", "--bundles", "nsis")
+# Not `$args`: that is PowerShell's automatic parameter array, and `npx @tauriArgs` would then run npx with no arguments.
+$tauriArgs = @("tauri", "build", "--bundles", "nsis")
 if ($env:HUDDLE_WIN_CERT_THUMBPRINT) {
-  $args += @("--config", ('{"bundle":{"windows":{"certificateThumbprint":"' + $env:HUDDLE_WIN_CERT_THUMBPRINT + '","digestAlgorithm":"sha256","timestampUrl":"http://timestamp.digicert.com"}}}'))
+  $tauriArgs += @("--config", ('{"bundle":{"windows":{"certificateThumbprint":"' + $env:HUDDLE_WIN_CERT_THUMBPRINT + '","digestAlgorithm":"sha256","timestampUrl":"http://timestamp.digicert.com"}}}'))
 }
-npx @args
+npx @tauriArgs
 if ($LASTEXITCODE -ne 0) { throw "tauri build failed" }
 
 $version = (Get-Content (Join-Path $root "apps\desktop\src-tauri\tauri.conf.json") | ConvertFrom-Json).version
-$setup = Get-ChildItem (Join-Path $root "apps\desktop\src-tauri\target.nosync\release\bundle\nsis") -Filter *.exe | Select-Object -First 1
+# Tauri names its installer Huddle_<version>_x64-setup.exe; the release asset copied below sits next to it.
+$setup = Get-ChildItem (Join-Path $root "apps\desktop\src-tauri\target.nosync\release\bundle\nsis") -Filter "Huddle_*-setup.exe" | Select-Object -First 1
 if (-not $setup) { throw "no installer produced" }
 # The updater looks for "windows" or "x64" in the asset name; Tauri's default already has x64.
 $asset = Join-Path $setup.DirectoryName "Huddle-$version-windows-x64-setup.exe"

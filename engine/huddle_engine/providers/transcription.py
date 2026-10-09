@@ -54,6 +54,11 @@ def vocab_prompt(terms: list[str], limit: int = 60) -> str | None:
 
 
 def release_models() -> None:
+    try:
+        from . import parakeet_onnx
+        parakeet_onnx.release()
+    except Exception:
+        pass
     """Drop every cached model so an idle engine holds no model memory.
 
     faster-whisper models are created per call and die with their provider, but mlx_whisper keeps
@@ -93,6 +98,9 @@ def load_whisper(model_name: str, device: str = "auto", compute_type: str | None
     from faster_whisper import WhisperModel
 
     dev = "auto" if not device or device == "auto" else device
+    if dev == "cuda":
+        from . import cuda_runtime
+        cuda_runtime.activate()
     try:
         return WhisperModel(model_name, device=dev, compute_type=compute_type or "int8")
     except Exception:
@@ -297,12 +305,38 @@ def make_transcription_provider(model, vocab: list[str] | None, device: str = "a
     Whisper for MLX-format Whisper, CTranslate2 otherwise."""
     ref = model.path or model.name
     if model.family == "parakeet":
+        if model.format == "ONNX":
+            from .parakeet_onnx import ParakeetOnnxProvider
+            return ParakeetOnnxProvider(ref, vocab=vocab)
         from .parakeet import ParakeetMlxProvider
         return ParakeetMlxProvider(ref, vocab=vocab)
     if model.format == "MLX":
         return MlxWhisperProvider(ref, vocab=vocab)
-    dev = "cpu" if device in ("auto", "cpu", "apple-gpu-metal") else device
-    return FasterWhisperProvider(model=ref, device=dev, vocab=vocab)
+    dev, compute_type = ct2_device(device)
+    return FasterWhisperProvider(model=ref, device=dev, compute_type=compute_type, vocab=vocab)
+
+
+def cuda_available() -> bool:
+    """CTranslate2 sees an NVIDIA GPU and cuBLAS is in place (the wheel carries cuDNN but not
+    cuBLAS; see providers/cuda_runtime.py). Without cuBLAS a CUDA model loads and then fails on
+    the first matrix multiply, so it does not count."""
+    try:
+        import ctranslate2
+
+        from . import cuda_runtime
+        return ctranslate2.get_cuda_device_count() > 0 and cuda_runtime.installed()
+    except Exception:
+        return False
+
+
+def ct2_device(device: str) -> tuple[str, str | None]:
+    """The CTranslate2 device and compute type for a Settings compute-device id. CUDA runs
+    int8 weights with float16 activations: as fast as float16, half the graphics memory, which
+    matters on a card that also holds the AI model. Anything CTranslate2 cannot do is the CPU
+    (int8); `load_whisper` also falls back to it when a CUDA load fails."""
+    if device == "nvidia-cuda" or (device == "auto" and cuda_available()):
+        return "cuda", "int8_float16"
+    return "cpu", "int8"
 
 
 def pick_language(detector, audio: np.ndarray, regions: list[tuple[float, float]], sr: int = 16000,

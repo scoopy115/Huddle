@@ -269,31 +269,29 @@ def assess(hw: dict) -> dict:
 
     if unified:
         tier = "full"
-        details.append(f"{_gb(mem)} unified memory shared by the CPU and GPU")
         details.append("Transcription and AI notes run on the GPU")
         if mem < 16 * GB:
             details.append("Small AI models only (4B); larger ones need 16 GB")
     elif gpu and acc and acc >= MIN_VRAM_FOR_LLM:
         tier = "full"
-        details.append(f"{gpu['name']} with {_gb(acc)} of graphics memory")
-        details.append("AI notes run on the graphics card")
-        details.append("Transcription runs on the CPU")
+        if gpu.get("vendor") == "nvidia":
+            details.append("Transcription and AI notes run on the graphics card")
+        else:
+            details.append("AI notes run on the graphics card")
+            details.append("Transcription runs on the CPU")
         if acc < 12 * GB:
             details.append("Small AI models only (4B); larger ones need 12 GB of graphics memory")
     elif mem >= MIN_RAM_FOR_CPU_LLM and cores >= 4:
         tier = "limited"
         if gpu:
-            details.append(f"{gpu['name']} has too little graphics memory ({_gb(acc)}); it is not used")
+            details.append("The graphics card has too little memory for AI models; it is not used")
         else:
             details.append("No dedicated graphics card")
-        details.append(f"{_gb(mem)} of memory; everything runs on the CPU")
-        details.append("Transcription and AI notes take several times longer than on a GPU")
+        details.append("Transcription and AI notes run on the CPU, several times slower than on a GPU")
     else:
         tier = "minimal"
         if mem and mem < MIN_RAM_FOR_TRANSCRIPTION:
-            details.append(f"{_gb(mem)} of memory; small transcription models only")
-        else:
-            details.append(f"{_gb(mem)} of memory, no usable graphics card")
+            details.append("Small transcription models only")
         details.append("AI notes need 16 GB of memory or a graphics card with 6 GB")
         details.append("Transcription works")
     title = {"full": "Ready for local AI", "limited": "Runs on the CPU", "minimal": "Transcription only"}[tier]
@@ -376,9 +374,12 @@ def compute_devices() -> list[ComputeDevice]:
     except Exception:
         pass
     if cuda:  # pragma: no cover - no CUDA on mac
+        # Usable once cuBLAS is there (the "GPU acceleration" download, or a CUDA toolkit).
+        from .cuda_runtime import installed as cublas_installed
+        ready = cublas_installed()
         nv = next((g for g in hw["gpus"] if g["vendor"] == "nvidia"), None)
         devices.append(ComputeDevice(id="nvidia-cuda", name=nv["name"] if nv else "NVIDIA GPU", vendor="nvidia", backend="cuda",
-                                     memory_bytes=nv["vramBytes"] if nv else None, device_type="gpu", available=True, recommended=True))
+                                     memory_bytes=nv["vramBytes"] if nv else None, device_type="gpu", available=ready, recommended=ready))
     devices.append(ComputeDevice(
         id="cpu", name=f"CPU ({hw['cpuCores']} cores)", vendor="cpu", backend="cpu",
         memory_bytes=hw["memoryBytes"], device_type="cpu", available=True,

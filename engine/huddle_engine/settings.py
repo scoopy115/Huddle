@@ -87,6 +87,8 @@ DEFAULT_USER_SETTINGS: dict[str, Any] = {
     "models.whisper": None,                  # LocalModel id
     "models.ai": None,                       # LocalModel id (Ollama model)
     # speakers
+    # notes
+    "notes.enabled": True,                   # False: transcript and speakers only, no AI notes
     "speakers.diarization": True,
     "speakers.recognition": True,
     "speakers.inferNames": True,             # "Daan, kun jij…" → next speaker is Daan

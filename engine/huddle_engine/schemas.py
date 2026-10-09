@@ -154,7 +154,7 @@ class StageState(Schema):
 
 class ProcessingJob(Schema):
     meeting_id: str
-    state: Literal["queued", "running", "ready", "failed"]
+    state: Literal["queued", "running", "cancelling", "ready", "failed"]
     current_stage: str | None = None
     stages: dict[str, StageState]
     error: str | None = None
@@ -381,6 +381,8 @@ class DownloadCandidate(Schema):
     # Whether this computer can run it (resolver.fit): ok | slow | no, with the reason for the UI.
     fit: Literal["ok", "slow", "no"] = "ok"
     fit_reason: str | None = None
+    # Set by resolver.candidates_for: the model (and, for a GPU bundle, its runtime) is in place.
+    installed: bool | None = None
 
 
 class Resolution(Schema):

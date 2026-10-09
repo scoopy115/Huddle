@@ -10,7 +10,8 @@ import { checkForUpdates, scheduleUpdateChecks } from "@/lib/updates";
 import { UpdateDialog } from "@/components/UpdateDialog";
 import { PermissionsReminder } from "@/components/PermissionsReminder";
 import { AI_MISSING_HINT, NavContext, defaultParent, type View } from "@/lib/nav";
-import { isMac } from "@/lib/utils";
+import { isMac, isWindows } from "@/lib/utils";
+import { WindowControls } from "@/components/WindowControls";
 import type { Meeting, UserSettings } from "@/types/engine";
 import { Sidebar } from "@/components/Sidebar";
 import { CommandPalette } from "@/components/CommandPalette";
@@ -53,7 +54,9 @@ export default function App() {
       setAi({ ready: llm?.status === "ready", reason: llm?.reason ?? null, unsupported: llm?.status === "unsupported" });
       // "unsupported" (this computer cannot run an AI model) is settled: no setup screen for it.
       const ok = (s: string | undefined) => s === "ready" || s === "builtin" || s === "unsupported";
-      setNeedsSetup(plan.resolutions.some((r) => (r.task === "transcription" || r.task === "llm") && !ok(r.status)));
+      // Only the transcription model brings the setup screen back: without it nothing works. A
+      // missing AI model is explained where it matters (the meeting's notes, the AI buttons).
+      setNeedsSetup(plan.resolutions.some((r) => r.task === "transcription" && !ok(r.status)));
     } catch { /* engine not reachable yet */ }
   }, []);
   useEffect(() => {
@@ -281,6 +284,7 @@ export default function App() {
 
   useEffect(() => { if (!toast) return; const t = setTimeout(() => setToast(null), 5000); return () => clearTimeout(t); }, [toast]);
 
+  const showOnboarding = engine.state === "ready" && onboarded !== null && (view.kind === "onboarding" || ((!onboarded || (needsSetup && !setupDismissed)) && view.kind !== "settings"));
   const content = () => {
     if (engine.state === "failed" || engine.state === "stopped") {
       return (
@@ -301,7 +305,7 @@ export default function App() {
         </div>
       );
     }
-    if ((!onboarded || (needsSetup && !setupDismissed)) && view.kind !== "settings") {
+    if (showOnboarding) {
       return <OnboardingScreen returning={!!onboarded} onDone={() => { setOnboarded(true); setSetupDismissed(true); refreshAi(); }} />;
     }
     switch (view.kind) {
@@ -315,16 +319,26 @@ export default function App() {
       case "processes": return <ProcessesScreen onChanged={refreshMeetings} />;
       case "actions": return <ActionItemsScreen onChanged={refreshMeetings} />;
       case "settings": return <SettingsScreen section={view.section} engine={engine} />;
-      case "onboarding": return <OnboardingScreen returning={!!onboarded} onDone={() => { setOnboarded(true); setSetupDismissed(true); refreshAi(); go({ kind: "meetings" }); }} />;
+      case "onboarding": return <OnboardingScreen returning={false} onDone={() => { setOnboarded(true); setSetupDismissed(true); refreshAi(); go({ kind: "meetings" }); }} />;
     }
   };
 
   return (
     <NavContext.Provider value={{ view, go, back, ai: { ...ai, refresh: refreshAi } }}>
       <div className="flex h-full">
-        <Sidebar engine={engine} openActions={openActions} recording={recording} paused={paused} running={running} />
+        {/* Windows: the shell draws no title bar; WindowControls sit in the top-right corner. */}
+        {isWindows && <WindowControls />}
+        {/* No sidebar while the onboarding is on screen: its pages are not there yet. */}
+        {!showOnboarding && <Sidebar engine={engine} openActions={openActions} recording={recording} paused={paused} running={running} />}
         <main className="relative min-w-0 flex-1 bg-bg">
-          {content()}
+          {/* Windows: a draggable strip the height of the window controls above every screen, so a
+              screen's header and its buttons sit below them. */}
+          {isWindows ? (
+            <div className="flex h-full flex-col">
+              <div data-tauri-drag-region className="titlebar-drag h-8 shrink-0" />
+              <div className="relative min-h-0 flex-1">{content()}</div>
+            </div>
+          ) : content()}
           {toast && (
             <div className="absolute bottom-4 left-1/2 z-40 -translate-x-1/2 panel px-3 py-2 text-[12.5px] shadow-lg">{toast}</div>
           )}

@@ -19,19 +19,21 @@ const LABELS: Record<StageName, { doing: string; done: string; retry: string }> 
 
 export function ProcessingStatus({ job, onRetry, onCancel }: { job: ProcessingJob; onRetry: (stage: string) => void; onCancel?: () => void }) {
   const [showDetail, setShowDetail] = useState<string | null>(null);
-  const running = job.state === "running";
-  const queued = job.state === "queued";
+  const [pressed, setPressed] = useState(false);
+  const stopping = job.state === "cancelling" || (pressed && (job.state === "running" || job.state === "queued"));
+  const running = job.state === "running" && !stopping;
+  const queued = job.state === "queued" && !stopping;
   const failed = STAGES.filter((s) => job.stages[s]?.status === "failed");
 
   return (
     <div className="panel p-4">
       <div className="mb-3 flex items-center justify-between">
         <div className="text-[13px] font-semibold">
-          {queued ? "Waiting for another meeting to finish" : running ? "Processing meeting" : failed.length ? "Processing needs attention" : "Processed"}
+          {stopping ? "Stopping… the previous version is kept" : queued ? "Waiting for another meeting to finish" : running ? "Processing meeting" : failed.length ? "Processing needs attention" : "Processed"}
         </div>
         <div className="flex items-center gap-2">
-          {queued && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted" />}
-          {(running || queued) && onCancel && <Button size="sm" variant="ghost" onClick={onCancel} title="Cancel — keeps the previous version">Cancel</Button>}
+          {(queued || stopping) && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted" />}
+          {(running || queued) && onCancel && <Button size="sm" variant="ghost" onClick={() => { setPressed(true); onCancel(); }} title="Cancel — keeps the previous version">Cancel</Button>}
         </div>
       </div>
       <ol className="flex flex-col gap-1.5">

@@ -303,7 +303,7 @@ mod win {
     use super::*;
     use std::sync::atomic::{AtomicBool, Ordering};
 
-    use cpal::traits::{DeviceTrait, HostTrait};
+    use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 
     /// Windows has a microphone privacy switch but no query API we use; a missing input device is
     /// the only state we can see. The prompt (if any) comes from the first stream the app opens.
@@ -344,10 +344,45 @@ mod win {
     /// by the same writer the microphone uses.
     pub struct SystemTap {
         capture: Option<crate::recording::Capture>,
+        /// Our own silent render stream on the same device: WASAPI loopback only delivers
+        /// packets while *something* renders, so without it every quiet stretch is simply
+        /// missing from `system.wav` and everything after it lands too early in the mix.
+        silence: Option<cpal::Stream>,
         pause: Arc<crate::recording::Pause>,
         stopped: Arc<AtomicBool>,
         pub level: Arc<Mutex<f32>>,
         pub heard: Arc<AtomicBool>,
+    }
+
+    // cpal::Stream is !Send; the tap only moves between Tauri commands (see recording::Capture).
+    unsafe impl Send for SystemTap {}
+
+    /// A render stream of zeros that keeps the loopback timeline continuous (see `SystemTap`).
+    fn start_silence(device: &cpal::Device, config: &cpal::SupportedStreamConfig) -> Option<cpal::Stream> {
+        let err = |e: cpal::StreamError| log::warn!("silent render stream error: {e}");
+        let cfg: cpal::StreamConfig = config.clone().into();
+        let built = match config.sample_format() {
+            cpal::SampleFormat::F32 => device.build_output_stream(&cfg, |d: &mut [f32], _| d.fill(0.0), err, None),
+            cpal::SampleFormat::I16 => device.build_output_stream(&cfg, |d: &mut [i16], _| d.fill(0), err, None),
+            cpal::SampleFormat::U16 => device.build_output_stream(&cfg, |d: &mut [u16], _| d.fill(32768), err, None),
+            cpal::SampleFormat::I32 => device.build_output_stream(&cfg, |d: &mut [i32], _| d.fill(0), err, None),
+            other => {
+                log::warn!("no silent render stream for sample format {other:?}; quiet stretches may be dropped from system audio");
+                return None;
+            }
+        };
+        let stream = match built {
+            Ok(s) => s,
+            Err(e) => {
+                log::warn!("silent render stream failed: {e}; quiet stretches may be dropped from system audio");
+                return None;
+            }
+        };
+        if let Err(e) = stream.play() {
+            log::warn!("silent render stream would not start: {e}; quiet stretches may be dropped from system audio");
+            return None;
+        }
+        Some(stream)
     }
 
     impl SystemTap {
@@ -355,6 +390,7 @@ mod win {
             let device = cpal::default_host().default_output_device().ok_or("No playback device to capture system audio from.")?;
             // On WASAPI an output device opened for input is a loopback stream (cpal ≥ 0.15).
             let config = device.default_output_config().map_err(|e| format!("Could not read the playback device configuration: {e}"))?;
+            let silence = start_silence(&device, &config);
             let dir = out_wav.parent().map(Path::to_path_buf).ok_or("bad path")?;
             let level = Arc::new(Mutex::new(0f32));
             let heard = Arc::new(AtomicBool::new(false));
@@ -374,8 +410,8 @@ mod win {
             };
             let capture = crate::recording::start_capture(&device, config, out_wav.to_path_buf(), dir, None, stopped.clone(), pause.clone(), err_slot, cb)
                 .map_err(|e| format!("System audio capture could not start. {e}"))?;
-            log::info!("system audio: WASAPI loopback of {}", device.name().unwrap_or_default());
-            Ok(SystemTap { capture: Some(capture), pause, stopped, level, heard })
+            log::info!("system audio: WASAPI loopback of {}{}", device.name().unwrap_or_default(), if silence.is_some() { " (kept fed with silence)" } else { "" });
+            Ok(SystemTap { capture: Some(capture), silence, pause, stopped, level, heard })
         }
 
         pub fn set_paused(&self, paused: bool) {
@@ -384,10 +420,12 @@ mod win {
 
         pub fn stop(mut self) -> Result<(), String> {
             self.stopped.store(true, Ordering::Relaxed);
-            match self.capture.take() {
+            let result = match self.capture.take() {
                 Some(c) => crate::recording::finish_capture(c).map(|_| ()),
                 None => Ok(()),
-            }
+            };
+            drop(self.silence.take());
+            result
         }
     }
 }

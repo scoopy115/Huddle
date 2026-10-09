@@ -20,15 +20,16 @@ log = logging.getLogger(__name__)
 
 
 class EngineContext:
-    def __init__(self, cfg: EngineConfig | None = None, start_jobs: bool = True):
+    def __init__(self, cfg: EngineConfig | None = None, start_jobs: bool = True, recover_jobs: bool = True):
         self.cfg = cfg or EngineConfig()
         self.cfg.ensure_dirs()
         self.db = Database(self.cfg.db_path)
         self.hardware = hardware_info()
         s = self.settings()
         apply_path_overrides(self.cfg, s)
-        from .providers import ollama_runtime
+        from .providers import cuda_runtime, ollama_runtime
         ollama_runtime.configure(self.cfg.models_dir)
+        cuda_runtime.configure(self.cfg.models_dir)
         self.registry = Registry(self.db, self.cfg.models_dir)
         self.downloads = DownloadManager(self.cfg.models_dir, self.registry, self.db)
         self.jobs = JobRunner(self.db, self.cfg, self.registry, self.settings, self.hardware.get("memoryBytes"),
@@ -36,7 +37,7 @@ class EngineContext:
         self.mcp_network = None
         self.live = LiveManager(self.db)
         if start_jobs:
-            self.jobs.start()
+            self.jobs.start(recover=recover_jobs)
 
     # ---- settings ----------------------------------------------------------- #
     def settings(self) -> dict[str, Any]:

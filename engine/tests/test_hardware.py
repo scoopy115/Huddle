@@ -137,7 +137,7 @@ def test_llm_fit_without_a_card_needs_twice_the_memory_and_is_slow():
 def test_whisper_fit():
     assert fit(_cand("whisper:large-v3-turbo"), _pc(8 * GB, [IRIS])) == ("ok", None)
     assert fit(_cand("whisper:large-v3"), _pc(8 * GB, [IRIS]))[0] == "no"
-    assert fit(_cand("whisper:large-v3"), _pc(16 * GB, [IRIS]))[0] == "slow"
+    assert fit(_cand("whisper:large-v3"), _pc(16 * GB, [IRIS]))[0] == "ok"
     assert fit(_cand("whisper:large-v3"), _m4(16 * GB)) == ("ok", None)
     assert fit(_cand("whisper:small"), _pc(4 * GB, []))[0] == "ok"
     assert fit(_cand("whisper:medium"), _pc(4 * GB, []))[0] == "no"
@@ -159,7 +159,11 @@ def test_marketplace_hides_apple_silicon_builds_on_a_pc(db, cfg, monkeypatch):
     cands = candidates_for(_ctx(db, cfg, _pc(16 * GB, [RTX_4060]), monkeypatch))
     assert not any("(Apple Silicon)" in c.name for c in cands)
     by = {c.id: c for c in cands}
-    assert by["whisper:large-v3-turbo"].recommended and by["whisper:large-v3-turbo"].fit == "ok"
+    # On a PC with an NVIDIA card the GPU bundle is the automatic pick (where CUDA is possible at all).
+    from huddle_engine.providers import cuda_runtime
+    pick = "whisper:cuda-large-v3-turbo" if cuda_runtime.supported() else "whisper:large-v3-turbo"
+    assert by[pick].recommended and by[pick].fit == "ok"
+    assert by["whisper:large-v3-turbo"].fit == "ok"
     assert by["ollama:qwen3.5:4b"].recommended and by["ollama:qwen3.5:4b"].fit == "ok"
     assert by["ollama:qwen3.5:9b"].fit == "no" and by["ollama:qwen3.5:9b"].fit_reason
 
@@ -193,3 +197,15 @@ def test_whisper_pick_follows_memory(db, cfg, monkeypatch):
     assert _whisper_download(_ctx(db, cfg, _pc(4 * GB, []), monkeypatch)).id == "whisper:small"
     assert _whisper_download(_ctx(db, cfg, _pc(8 * GB, []), monkeypatch)).id == "whisper:medium"
     assert _whisper_download(_ctx(db, cfg, _pc(16 * GB, []), monkeypatch)).id == "whisper:large-v3-turbo"
+
+
+def test_ct2_device_mapping(monkeypatch):
+    from huddle_engine.providers import transcription as tr
+    monkeypatch.setattr(tr, "cuda_available", lambda: True)
+    assert tr.ct2_device("auto") == ("cuda", "int8_float16")
+    assert tr.ct2_device("nvidia-cuda") == ("cuda", "int8_float16")
+    assert tr.ct2_device("cpu") == ("cpu", "int8")
+    assert tr.ct2_device("apple-gpu-metal") == ("cpu", "int8")   # CT2 has no Metal; MLX handles the Mac GPU
+    monkeypatch.setattr(tr, "cuda_available", lambda: False)
+    assert tr.ct2_device("auto") == ("cpu", "int8")
+    assert tr.ct2_device("nvidia-cuda") == ("cuda", "int8_float16")   # chosen by hand: try, load_whisper falls back

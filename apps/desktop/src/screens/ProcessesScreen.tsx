@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Activity, Download, Mic, X } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { api, errorMessage } from "@/lib/api";
 import type { ProcessesInfo } from "@/types/engine";
 import { fmtBytes, fmtEta, fmtTime } from "@/lib/format";
@@ -14,10 +15,11 @@ const STAGE_WORD: Record<string, string> = {
 export function ProcessesScreen({ onChanged }: { onChanged: () => void }) {
   const { go } = useNav();
   const [info, setInfo] = useState<ProcessesInfo | null>(null);
+  const [stoppingIds, setStoppingIds] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const tick = () => api.processes().then(setInfo).catch((e) => setError(errorMessage(e)));
+    const tick = () => api.processes().then((i) => { setInfo(i); setStoppingIds((s) => new Set([...s].filter((id) => i.jobs.some((j) => j.meetingId === id)))); }).catch((e) => setError(errorMessage(e)));
     tick();
     const t = setInterval(tick, 1500);
     return () => clearInterval(t);
@@ -44,19 +46,22 @@ export function ProcessesScreen({ onChanged }: { onChanged: () => void }) {
                   {info.jobs.map((j) => {
                     const pct = j.progress != null ? Math.round(j.progress * 100) : null;
                     const eta = fmtEta(j.startedAt, j.progress);
+                    // "Stopping…" from the click on, before the engine confirms (a CPU transcription
+                    // lets go after its current 30 s window, a summary at the next token).
+                    const stopping = j.state === "cancelling" || stoppingIds.has(j.meetingId);
                     return (
                       <div key={j.meetingId} className="flex items-center gap-4 border-b border-border px-4 py-3 last:border-b-0">
-                        <Spinner className="h-4 w-4 text-accent" />
+                        <Spinner className={cn("h-4 w-4", stopping ? "text-muted" : "text-accent")} />
                         <div className="min-w-0 flex-1">
                           <button className="truncate text-[13.5px] font-medium hover:text-accent" onClick={() => go({ kind: "meeting", id: j.meetingId })}>{j.title}</button>
                           <div className="mt-0.5 flex items-center gap-2 text-[12px] text-muted">
-                            <span>{j.state === "queued" ? "Waiting for another meeting to finish" : (j.stage ? STAGE_WORD[j.stage] ?? j.stage : "Starting")}</span>
-                            {pct != null && <span className="font-mono tabular-nums text-accent">{pct}%</span>}
-                            {eta && <span>{eta}</span>}
+                            <span>{stopping ? "Stopping… the previous version is kept" : j.state === "queued" ? "Waiting for another meeting to finish" : (j.stage ? STAGE_WORD[j.stage] ?? j.stage : "Starting")}</span>
+                            {!stopping && pct != null && <span className="font-mono tabular-nums text-accent">{pct}%</span>}
+                            {!stopping && eta && <span>{eta}</span>}
                           </div>
-                          {pct != null && <div className="mt-1.5 h-1 w-full max-w-[320px] overflow-hidden rounded bg-fg/10"><div className="h-full bg-accent transition-all" style={{ width: `${pct}%` }} /></div>}
+                          {!stopping && pct != null && <div className="mt-1.5 h-1 w-full max-w-[320px] overflow-hidden rounded bg-fg/10"><div className="h-full bg-accent transition-all" style={{ width: `${pct}%` }} /></div>}
                         </div>
-                        <Button size="sm" variant="ghost" title="Cancel — keeps the previous version" onClick={async () => { await api.cancelProcessing(j.meetingId); onChanged(); }}><X className="h-3.5 w-3.5" /> Cancel</Button>
+                        {!stopping && <Button size="sm" variant="ghost" title="Cancel — keeps the previous version" onClick={async () => { setStoppingIds((s) => new Set(s).add(j.meetingId)); await api.cancelProcessing(j.meetingId); onChanged(); }}><X className="h-3.5 w-3.5" /> Cancel</Button>}
                       </div>
                     );
                   })}

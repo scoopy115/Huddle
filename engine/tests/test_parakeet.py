@@ -62,3 +62,21 @@ def test_resolver_never_picks_parakeet_automatically(db, cfg):
     chosen = resolve_transcription(ResolverContext(registry=reg, settings={"models.whisper": para.id}, memory_bytes=None))
     assert chosen.model.id == para.id and chosen.provider == "parakeet_mlx"
     assert _transcription_provider_id(para) == "parakeet_mlx"
+
+
+def test_resolver_ignores_the_language_detectors_tiny_model(db, cfg):
+    """After the first meeting the detector has put faster-whisper-tiny in the HF cache; Automatic
+    must still ask for a real model instead of transcribing with tiny."""
+    from huddle_engine.discovery.registry import Registry
+    from huddle_engine.resolver import ResolverContext, resolve_transcription
+    from huddle_engine.schemas import LocalModel
+    reg = Registry(db, cfg)
+    tiny = LocalModel(id="huggingface:Systran/faster-whisper-tiny", name="Systran/faster-whisper-tiny",
+                      family="whisper", task="transcription", source="huggingface", format="CTranslate2", path="/t",
+                      compatible_runtimes=["faster-whisper"], compatible=True, meta={"whisperSize": "tiny"})
+    reg.models = lambda task=None: [tiny]  # type: ignore[method-assign]
+    reg.model = lambda mid: {tiny.id: tiny}.get(mid)  # type: ignore[method-assign]
+    auto = resolve_transcription(ResolverContext(registry=reg, settings={}, memory_bytes=None))
+    assert auto.status == "download_required" and auto.download is not None
+    chosen = resolve_transcription(ResolverContext(registry=reg, settings={"models.whisper": tiny.id}, memory_bytes=None))
+    assert chosen.status == "ready" and chosen.model.id == tiny.id

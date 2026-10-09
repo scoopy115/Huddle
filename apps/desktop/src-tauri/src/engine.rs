@@ -310,9 +310,12 @@ pub fn stop_if_idle(app: &AppHandle) {
             None => return,
         };
         let client = match reqwest::Client::builder().timeout(Duration::from_secs(2)).build() { Ok(c) => c, Err(_) => return };
+        // Only a clear "no active job" answer counts as idle. An engine that does not answer is
+        // most likely busy (a long speaker-separation pass can keep it from responding), and a
+        // job must never be killed on a guess; it is stopped on the next hide once it answers.
         let idle = match client.get(format!("http://127.0.0.1:{port}/health")).bearer_auth(&tok).send().await {
-            Ok(r) => r.json::<Value>().await.map(|v| v.get("activeJob").map(|j| j.is_null()).unwrap_or(true)).unwrap_or(false),
-            Err(_) => true,
+            Ok(r) => r.json::<Value>().await.map(|v| v.get("activeJob").map(|j| j.is_null()).unwrap_or(false)).unwrap_or(false),
+            Err(_) => false,
         };
         if idle {
             log::info!("window hidden and engine idle — stopping engine");

@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import logging
 import sys
@@ -17,6 +18,11 @@ from pathlib import Path
 
 def _logging(cfg) -> None:
     cfg.ensure_dirs()
+    # Windows gives a redirected stderr the ANSI code page, so a title with a character outside
+    # it would make every log line about it fail; write UTF-8 and never raise.
+    if hasattr(sys.stderr, "reconfigure"):
+        with contextlib.suppress(ValueError, OSError):
+            sys.stderr.reconfigure(encoding="utf-8", errors="replace")
     fmt = "%(asctime)s %(levelname)s %(name)s: %(message)s"
     handlers = [logging.StreamHandler(sys.stderr),
                 logging.FileHandler(cfg.logs_dir / "engine.log", encoding="utf-8")]

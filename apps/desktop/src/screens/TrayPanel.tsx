@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ExternalLink, Mic, Monitor, Pause, Play, Power, Square } from "lucide-react";
 import { native, type InputDevice, type RecordingMeta, type ShellPrefs } from "@/lib/native";
 import { fmtTime } from "@/lib/format";
-import { modKey } from "@/lib/utils";
+import { isMac, recordShortcut } from "@/lib/utils";
 import { BrandMark } from "@/components/ui";
 
 const BARS = 40;
@@ -22,6 +22,7 @@ export function TrayPanel() {
   const [warning, setWarning] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const levels = useRef<number[]>(new Array(BARS).fill(0));
+  const sysLevels = useRef<number[]>(new Array(BARS).fill(0));
   const canvas = useRef<HTMLCanvasElement>(null);
   const raf = useRef(0);
 
@@ -70,6 +71,7 @@ export function TrayPanel() {
         setBusy(false);
         setWarning(null);
         levels.current.fill(0);
+        sysLevels.current.fill(0);
       })
       .then((u) => uns.push(u));
     native
@@ -93,6 +95,8 @@ export function TrayPanel() {
       .onLevel((e) => {
         levels.current.push(level(e.rms));
         if (levels.current.length > BARS) levels.current.shift();
+        sysLevels.current.push(level(e.systemRms ?? 0));
+        if (sysLevels.current.length > BARS) sysLevels.current.shift();
         setElapsed(e.elapsedSec);
       })
       .then((u) => uns.push(u));
@@ -125,13 +129,27 @@ export function TrayPanel() {
         const rec = getComputedStyle(document.documentElement)
           .getPropertyValue("--record")
           .trim();
+        const ink = getComputedStyle(document.documentElement)
+          .getPropertyValue("--fg")
+          .trim();
         for (let i = 0; i < BARS; i++) {
           const v = levels.current[i] ?? 0;
+          const sv = meta?.systemFilePath ? sysLevels.current[i] ?? 0 : 0;
+          const x = i * (bw + gap);
           const bh = Math.max(2.5, v * h);
           ctx.fillStyle = `rgb(${rec} / ${meta ? 0.3 + v * 0.7 : 0.18})`;
           ctx.beginPath();
-          ctx.roundRect(i * (bw + gap), (h - bh) / 2, bw, bh, 1.5);
+          ctx.roundRect(x, (h - bh) / 2, bw, bh, 1.5);
           ctx.fill();
+          // System audio (the other side of the call) as the grey bar inside the red one, as
+          // on the record screen.
+          if (sv > 0) {
+            const sh = Math.max(2, sv * h * 0.6);
+            ctx.fillStyle = `rgb(${ink} / 0.35)`;
+            ctx.beginPath();
+            ctx.roundRect(x, (h - sh) / 2, bw, sh, 1.5);
+            ctx.fill();
+          }
         }
       }
       raf.current = requestAnimationFrame(draw);
@@ -156,9 +174,9 @@ export function TrayPanel() {
   };
 
   return (
-    <div className="flex h-screen w-screen flex-col items-stretch px-2 pb-2 pt-[9px] text-fg">
-      {/* Arrow pointing at the menu-bar icon. */}
-      <div className="relative z-10 mx-auto -mb-[7px] h-[14px] w-[14px] rotate-45 rounded-[3px] border-l border-t border-border bg-surface" />
+    <div className={`flex h-screen w-screen flex-col items-stretch px-2 pb-2 text-fg ${isMac ? "pt-[9px]" : "pt-2"}`}>
+      {/* Arrow pointing up at the menu-bar icon. Windows opens the panel above the taskbar icon: no arrow. */}
+      {isMac && <div className="relative z-10 mx-auto -mb-[7px] h-[14px] w-[14px] rotate-45 rounded-[3px] border-l border-t border-border bg-surface" />}
       <div className="panel relative flex flex-1 flex-col overflow-hidden px-4 pb-3 pt-3.5 shadow-2xl">
         <div
           className={`pointer-events-none absolute inset-0 transition-opacity duration-700 wash-accent ${meta ? "opacity-100" : "opacity-50"}`}
@@ -170,7 +188,7 @@ export function TrayPanel() {
             Huddle
           </span>
           <span className="ml-auto rounded-md border border-border px-1.5 py-0.5 font-mono text-[10.5px] text-muted">
-            {modKey}⌥R
+            {recordShortcut}
           </span>
         </header>
 

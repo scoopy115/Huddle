@@ -66,3 +66,27 @@ def test_bandwidth_note_flags_narrowband_audio():
     narrow = (np.sin(2 * np.pi * 300 * t) + 0.5 * np.sin(2 * np.pi * 2500 * t)).astype(np.float32)
     assert bandwidth_note(wide, sr) is None
     assert "narrowband" in (bandwidth_note(narrow, sr) or "")
+
+
+def test_powerset_frames_become_turns_per_local_speaker():
+    import numpy as np
+
+    from huddle_engine.providers.diarization import POWERSET, powerset_turns
+    # 100 frames of 0.1 s: speaker 0 talks 0-3 s, both 3-4 s, speaker 1 alone 4-6 s with a
+    # 0.2 s hiccup at 5.0 (bridged), then a 0.1 s blip of speaker 2 at 8 s (dropped).
+    cls = [0] * 100
+    for i in range(0, 30):
+        cls[i] = POWERSET.index((0,))
+    for i in range(30, 40):
+        cls[i] = POWERSET.index((0, 1))
+    for i in range(40, 60):
+        cls[i] = POWERSET.index((1,))
+    cls[50], cls[51] = 0, 0
+    cls[80] = POWERSET.index((2,))
+    logits = np.full((100, 7), -10.0)
+    logits[np.arange(100), cls] = 0.0
+    turns = powerset_turns(logits, 0.1, 100.0, 100.0, 110.0)
+    assert [(round(a, 1), round(b, 1), s) for a, b, s in turns] == [(100.0, 104.0, 0), (103.0, 106.0, 1)]
+    # the keep window clips at both ends
+    turns = powerset_turns(logits, 0.1, 100.0, 100.5, 105.0)
+    assert [(round(a, 1), round(b, 1), s) for a, b, s in turns] == [(100.5, 104.0, 0), (103.0, 105.0, 1)]

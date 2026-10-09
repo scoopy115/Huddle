@@ -35,6 +35,8 @@ computer.
 * **Summary, topics, decisions:** structured notes with evidence links back into the transcript,
   written in the language you choose (56 languages) whatever language was spoken.
 * **Action items:** extracted on demand and tracked across meetings until you tick them off.
+* **Transcript only:** turn AI notes off in Settings and a meeting gets its transcript with
+  speakers and nothing else; no AI model is loaded while processing.
 * **Refine:** tell Huddle what it got wrong  and it
   rewrites the notes.
 * **Ask:** ask one meeting, one project or all of them a question.
@@ -70,8 +72,9 @@ recommended; the small AI model also runs on 8 GB.
 
 **Windows (preview):** Windows 10/11, x64. For AI notes you need a graphics card with 6 GB of
 memory or more (NVIDIA recommended), or 16 GB of system memory for the slow CPU-only path;
-with less, Huddle still transcribes and separates speakers but makes no notes. Transcription
-runs on the CPU on Windows for now.
+with less, Huddle still transcribes and separates speakers but makes no notes. With an NVIDIA
+card, pick "Whisper large-v3-turbo (NVIDIA GPU)" in the set-up or under Settings → Models and the
+transcription runs on the card as well. Parakeet is available on Windows too (CPU, via ONNX).
 
 1. Download `Huddle-<version>-macos-arm64.dmg` (macOS) or `Huddle-<version>-windows-x64-setup.exe`
    (Windows) from the latest [release](../../releases/latest). On a Mac, open the image and drag

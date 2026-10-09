@@ -11,6 +11,7 @@ that produced it (vectors of different models are never compared).
 """
 from __future__ import annotations
 
+import logging
 import traceback
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -19,8 +20,22 @@ import numpy as np
 
 from .base import ProviderError, Segment, Word
 
+log = logging.getLogger(__name__)
+
 WIN_SEC = 3.0
 HOP_SEC = 1.5
+
+# pyannote segmentation 3.0 straight through ONNX Runtime: 10 s windows, 7 "powerset" classes
+# per frame (nobody, one of three local speakers, or two of them at once). sherpa-onnx's own
+# diarization pass runs the same model but then also extracts an embedding per chunk and
+# speaker and clusters them, work this provider repeats anyway with its own windows and
+# clustering; skipping it made a 53-minute meeting go from 235 s to seconds for this step.
+POWERSET = ((), (0,), (1,), (2,), (0, 1), (0, 2), (1, 2))
+SEG_WINDOW_SEC = 10.0
+SEG_HOP_SEC = 9.0
+SEG_EDGE_SEC = 0.5         # frames this close to a window edge come from the neighbouring window
+MIN_TURN_ON_SEC = 0.2
+MIN_TURN_OFF_SEC = 0.3
 
 # sherpa: agglomerative (average-link, cosine) threshold on window embeddings. Calibrated on
 # real meetings + the synthetic fixtures, see docs/DECISIONS.md.
@@ -237,6 +252,74 @@ def bandwidth_note(audio: np.ndarray, sr: int) -> str | None:
 
 
 # ---------------------------------------------------------------------------------------- #
+def powerset_turns(logits: np.ndarray, frame_sec: float, offset_sec: float, keep_from: float, keep_to: float,
+                   min_on: float = MIN_TURN_ON_SEC, min_off: float = MIN_TURN_OFF_SEC) -> list[tuple[float, float, int]]:
+    """Frames × 7 class scores of one window → turns ``(start, end, local_speaker)`` in absolute
+    seconds, clipped to ``[keep_from, keep_to)``. Per local speaker: gaps shorter than ``min_off``
+    are bridged, turns shorter than ``min_on`` dropped. Two speakers at once give two turns."""
+    cls = np.asarray(logits).argmax(axis=1)
+    n = len(cls)
+    out: list[tuple[float, float, int]] = []
+    for spk in range(3):
+        active = np.fromiter((spk in POWERSET[int(c)] for c in cls), dtype=bool, count=n)
+        runs: list[tuple[float, float]] = []
+        i = 0
+        while i < n:
+            if active[i]:
+                j = i
+                while j < n and active[j]:
+                    j += 1
+                a, b = offset_sec + i * frame_sec, offset_sec + j * frame_sec
+                if runs and a - runs[-1][1] < min_off:
+                    runs[-1] = (runs[-1][0], b)
+                else:
+                    runs.append((a, b))
+                i = j
+            else:
+                i += 1
+        for a, b in runs:
+            a2, b2 = max(a, keep_from), min(b, keep_to)
+            if b2 - a2 >= min_on:
+                out.append((a2, b2, spk))
+    out.sort()
+    return out
+
+
+def segment_turns(audio: np.ndarray, sr: int, model_path: str, threads: int,
+                  progress: Callable[[float], None] | None = None,
+                  cancelled: Callable[[], bool] | None = None) -> list[tuple[float, float, int]]:
+    """Speaker turns for the whole recording from the segmentation model alone. Windows overlap
+    by one second and each frame is taken from the window where it is furthest from an edge, so
+    turns only break at window seams (harmless: a turn split in two is still one voice)."""
+    import onnxruntime as ort
+    so = ort.SessionOptions()
+    so.intra_op_num_threads = max(1, threads)
+    so.log_severity_level = 3
+    sess = ort.InferenceSession(str(model_path), so, providers=["CPUExecutionProvider"])
+    name = sess.get_inputs()[0].name
+    win, hop = int(SEG_WINDOW_SEC * sr), int(SEG_HOP_SEC * sr)
+    total = len(audio)
+    starts = [0]
+    while starts[-1] + win < total:
+        starts.append(starts[-1] + hop)
+    turns: list[tuple[float, float, int]] = []
+    for k, s in enumerate(starts):
+        if cancelled and cancelled() and k % 10 == 0:
+            raise _Cancelled()
+        chunk = audio[s:s + win]
+        if len(chunk) < win:
+            chunk = np.pad(chunk, (0, win - len(chunk)))
+        y = sess.run(None, {name: chunk.reshape(1, 1, -1).astype(np.float32)})[0][0]
+        frame_sec = SEG_WINDOW_SEC / len(y)
+        keep_from = s / sr + (SEG_EDGE_SEC if k > 0 else 0.0)
+        keep_to = total / sr if k == len(starts) - 1 else s / sr + SEG_WINDOW_SEC - SEG_EDGE_SEC
+        turns.extend(powerset_turns(y, frame_sec, s / sr, keep_from, keep_to))
+        if progress and k % 5 == 0:
+            progress((k + 1) / len(starts))
+    turns.sort()
+    return turns
+
+
 # sherpa-onnx: pyannote segmentation + speaker embeddings
 # ---------------------------------------------------------------------------------------- #
 class SherpaDiarizationProvider:
@@ -272,27 +355,35 @@ class SherpaDiarizationProvider:
                 sr = 16000
             notes = [n for n in [bandwidth_note(audio, sr)] if n]
 
-            # 1. speaker turns (pyannote segmentation; sherpa's own clustering only serves to
-            #    stitch locally consistent turns — our clustering below decides who is who)
+            # 1. speaker turns from the segmentation model (our clustering below decides who is
+            #    who). sherpa-onnx's full diarization pass is the fallback should the direct ONNX
+            #    path fail (an unexpected model export, a broken onnxruntime).
             emb_cfg = sherpa_onnx.SpeakerEmbeddingExtractorConfig(model=self.embedding_model, num_threads=self.threads)
-            cfg = sherpa_onnx.OfflineSpeakerDiarizationConfig(
-                segmentation=sherpa_onnx.OfflineSpeakerSegmentationModelConfig(
-                    pyannote=sherpa_onnx.OfflineSpeakerSegmentationPyannoteModelConfig(model=self.segmentation_model),
-                    num_threads=self.threads),
-                embedding=emb_cfg,
-                clustering=sherpa_onnx.FastClusteringConfig(num_clusters=-1, threshold=0.7),
-                min_duration_on=0.2, min_duration_off=0.3)
-            sd = sherpa_onnx.OfflineSpeakerDiarization(cfg)
+            try:
+                turns = segment_turns(audio, sr, self.segmentation_model, self.threads,
+                                      progress=(lambda f: progress(0.15 * f)) if progress else None, cancelled=cancelled)
+            except _Cancelled:
+                raise
+            except Exception:
+                log.exception("direct segmentation failed; using sherpa-onnx's diarization pass")
+                cfg = sherpa_onnx.OfflineSpeakerDiarizationConfig(
+                    segmentation=sherpa_onnx.OfflineSpeakerSegmentationModelConfig(
+                        pyannote=sherpa_onnx.OfflineSpeakerSegmentationPyannoteModelConfig(model=self.segmentation_model),
+                        num_threads=self.threads),
+                    embedding=emb_cfg,
+                    clustering=sherpa_onnx.FastClusteringConfig(num_clusters=-1, threshold=0.7),
+                    min_duration_on=MIN_TURN_ON_SEC, min_duration_off=MIN_TURN_OFF_SEC)
+                sd = sherpa_onnx.OfflineSpeakerDiarization(cfg)
 
-            def cb(done: int, total: int, *_: object) -> int:
-                if progress and total:
-                    progress(0.55 * done / total)
-                return 0
+                def cb(done: int, total: int, *_: object) -> int:
+                    if progress and total:
+                        progress(0.15 * done / total)
+                    return 0
 
-            raw = sd.process(audio, callback=cb).sort_by_start_time()
+                raw = sd.process(audio, callback=cb).sort_by_start_time()
+                turns = [(float(r.start), float(r.end), int(r.speaker)) for r in raw]
             if cancelled and cancelled():
                 raise _Cancelled()
-            turns = [(float(r.start), float(r.end), int(r.speaker)) for r in raw]
 
             # 2. windows over turns (turns are speaker-homogeneous, so windows never straddle a change)
             windows: list[tuple[int, float, float]] = []
@@ -320,7 +411,7 @@ class SherpaDiarizationProvider:
                 stream.input_finished()
                 X[k] = np.asarray(extractor.compute(stream), dtype=np.float32)
                 if progress and k % 10 == 0:
-                    progress(0.55 + 0.4 * (k + 1) / len(windows))
+                    progress(0.15 + 0.8 * (k + 1) / len(windows))
             X /= np.maximum(np.linalg.norm(X, axis=1, keepdims=True), 1e-9)
             dur = np.array([b - a for _, a, b in windows], dtype=np.float32)
 

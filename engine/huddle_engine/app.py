@@ -85,7 +85,7 @@ def _sync_mcp_network() -> None:
 async def lifespan(app: FastAPI):
     global _ctx
     # HUDDLE_NO_JOBS=1: a second engine (e.g. tests, a CLI next to the app) must not process jobs alongside the app's engine.
-    _ctx = EngineContext(start_jobs=not os.getenv("HUDDLE_NO_JOBS"))
+    _ctx = EngineContext(start_jobs=not os.getenv("HUDDLE_NO_JOBS"), recover_jobs=False)
     try:
         _ctx.registry.quick_check()
     except Exception:
@@ -105,6 +105,9 @@ async def lifespan(app: FastAPI):
     except Exception:
         log.exception("mcp network init failed")
     log.info("engine ready · data dir %s · schema v%d", _ctx.cfg.data_dir, _ctx.db.schema_version)
+    # Interrupted jobs resume only now, after the app can reach us (see JobRunner.start).
+    if not os.getenv("HUDDLE_NO_JOBS"):
+        _ctx.jobs.recover()
     yield
     _ctx.close()
 
@@ -430,7 +433,7 @@ def processes():
     """Everything currently running or waiting: processing jobs, live transcriptions, downloads."""
     c = ctx()
     rows = c.db.query("SELECT j.*, m.title FROM processing_jobs j JOIN meetings m ON m.id = j.meeting_id"
-                      " WHERE j.state IN ('queued','running') ORDER BY j.updated_at")
+                      " WHERE j.state IN ('queued','running','cancelling') ORDER BY j.updated_at")
     import json as _json
     jobs = []
     for r in rows:

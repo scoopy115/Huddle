@@ -58,7 +58,7 @@ export function PermissionsPanel({ perms, compact = false }: { perms: ReturnType
           <div className="text-[13.5px] font-medium">System audio</div>
           <div className="text-[12px] text-muted">
             {!sysSupported ? (perms.system?.message ?? "Not available on this computer.")
-              : sysOk ? (isMac ? "Allowed" : "Captured from the playback device; no permission needed.")
+              : sysOk ? (isMac ? "Allowed" : "No permission needed.")
               : sysUnknown ? "Checking…"
               : "Turned off. Allow Huddle under Privacy & Security → System Audio Recording."}
           </div>

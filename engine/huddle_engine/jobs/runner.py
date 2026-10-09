@@ -20,6 +20,7 @@ from ..db import Database
 from ..discovery.registry import Registry
 from ..providers import ollama_runtime
 from ..providers.base import ProviderError
+from ..providers.llm import LlmCancelled
 from ..providers.transcription import release_models
 from ..schemas import DEFAULT_PIPELINE, STAGES
 from ..settings import EngineConfig
@@ -45,8 +46,12 @@ class JobRunner:
         self._last_progress_write = 0.0
 
     # ---- lifecycle ---------------------------------------------------------- #
-    def start(self) -> None:
-        self.recover()
+    def start(self, recover: bool = True) -> None:
+        """Start the worker. The HTTP engine passes ``recover=False`` and calls ``recover()``
+        itself once it is serving: a resumed stage (a long speaker-separation pass) can keep the
+        process busy, and the app must not wait for that before it shows the window."""
+        if recover:
+            self.recover()
         self._thread.start()
 
     def recover(self) -> None:
@@ -86,8 +91,14 @@ class JobRunner:
         self._q.put((meeting_id, names))
 
     def cancel(self, meeting_id: str) -> None:
-        """Stop processing this meeting as soon as the current stage checks in (used on delete)."""
+        """Stop processing this meeting as soon as the current stage checks in (also used on
+        delete). The job shows "cancelling" from this moment until the stage has let go: a
+        CPU transcription finishes its current 30 s window first, a summary stops at the next
+        token."""
         self._cancelled.add(meeting_id)
+        row = self.db.one("SELECT state, current_stage, stages_json FROM processing_jobs WHERE meeting_id = ?", (meeting_id,))
+        if row and row["state"] in ("queued", "running"):
+            self._write(meeting_id, state="cancelling", current_stage=row["current_stage"], stages=json.loads(row["stages_json"]))
 
     def retry_stage(self, meeting_id: str, stage: str) -> None:
         if stage not in STAGES:
@@ -111,8 +122,14 @@ class JobRunner:
                     ollama_runtime.stop()
 
     def _run(self, meeting_id: str, names: list[str]) -> None:
-        self._cancelled.discard(meeting_id)
         if not self.db.one("SELECT 1 FROM meetings WHERE id = ?", (meeting_id,)):
+            self._cancelled.discard(meeting_id)
+            return
+        if meeting_id in self._cancelled:
+            # Cancelled while it was still waiting its turn.
+            self._cancelled.discard(meeting_id)
+            row = self.db.one("SELECT stages_json FROM processing_jobs WHERE meeting_id = ?", (meeting_id,))
+            self._cancelled_cleanup(meeting_id, json.loads(row["stages_json"]) if row else {}, None)
             return
         self._active = meeting_id
         row = self.db.one("SELECT stages_json FROM processing_jobs WHERE meeting_id = ?", (meeting_id,))
@@ -156,7 +173,7 @@ class JobRunner:
                 detail = st.STAGE_FUNCS[name](ctx)
                 stages[name].update(status="done", finished_at=time.time(), detail=detail, progress=1.0)
                 log.info("[%s] %s done in %.1fs — %s", meeting_id, name, time.time() - t0, detail)
-            except JobCancelled:
+            except (JobCancelled, LlmCancelled):
                 self._cancelled_cleanup(meeting_id, stages, name)
                 return
             except st.StageSkipped as e:
@@ -214,6 +231,8 @@ class JobRunner:
 
     def _write(self, meeting_id: str, *, state: str, current_stage: str | None, stages: dict,
                error: str | None = None, error_detail: str | None = None) -> None:
+        if state == "running" and meeting_id in self._cancelled:
+            state = "cancelling"   # progress ticks must not hide that the stop is under way
         now = time.time()
         self.db.execute(
             "INSERT INTO processing_jobs(meeting_id, state, current_stage, stages_json, error, error_detail, created_at, updated_at)"

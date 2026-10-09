@@ -101,6 +101,12 @@ pub fn run() {
                 let menu = build_menu(app)?;
                 app.set_menu(menu)?;
             }
+            // Windows: no native title bar; the UI draws the window controls (WindowControls.tsx)
+            // and marks its own drag regions. Resizing and the shadow stay with the system.
+            #[cfg(target_os = "windows")]
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.set_decorations(false);
+            }
             engine::spawn_on_startup(app.handle().clone(), data_dir);
             if shell_prefs::load(app.handle()).menu_bar {
                 tray::ensure(app.handle());
