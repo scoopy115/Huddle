@@ -208,7 +208,7 @@ export interface StageState {
 
 export interface ProcessingJob {
   meetingId: string;
-  state: "queued" | "running" | "ready" | "failed";
+  state: "queued" | "running" | "cancelling" | "ready" | "failed";
   currentStage: string | null;
   stages: Record<string, StageState>;
   error: string | null;
@@ -302,16 +302,38 @@ export interface DownloadCandidate {
   recommended: boolean;
   description: string | null;
   minMemoryBytes: number | null;
+  minVramBytes: number | null;
+  /** Whether this computer can run it (engine-side judgement); `fitReason` says why not, or why slowly. */
+  fit: "ok" | "slow" | "no";
+  /** Set by the engine: the model (and, for a GPU bundle, its runtime) is in place. */
+  installed?: boolean | null;
+  fitReason: string | null;
 }
 
 export interface Resolution {
   task: string;
-  status: "ready" | "download_required" | "builtin" | "unavailable";
+  /** unsupported: this computer cannot run anything for the task; nothing to download. */
+  status: "ready" | "download_required" | "builtin" | "unavailable" | "unsupported";
   model: LocalModel | null;
   provider: string | null;
   download: DownloadCandidate | null;
   reason: string;
   autoModel: LocalModel | null;
+}
+
+export interface GpuInfo {
+  name: string;
+  vendor: "apple" | "nvidia" | "amd" | "intel" | "other";
+  vramBytes: number | null;
+  /** Shares system memory (Apple Silicon, Intel Iris, AMD APU): not a card the models can live in. */
+  integrated: boolean;
+}
+
+export interface HardwareCapability {
+  /** full: a GPU the models fit in · limited: CPU only, slow · minimal: transcription only. */
+  tier: "full" | "limited" | "minimal";
+  title: string;
+  details: string[];
 }
 
 export interface HardwareInfo {
@@ -322,6 +344,13 @@ export interface HardwareInfo {
   cpuCores: number;
   memoryBytes: number | null;
   appleSilicon: boolean;
+  /** CPU and GPU share one memory pool (Apple Silicon). */
+  unifiedMemory: boolean;
+  gpus: GpuInfo[];
+  /** Memory the AI models can use on a GPU: all of it with unified memory, the best card's VRAM on a PC, null = CPU only. */
+  acceleratorBytes: number | null;
+  acceleratorName: string | null;
+  capability: HardwareCapability;
 }
 
 export interface SetupPlan {
@@ -417,6 +446,7 @@ export type UserSettings = Record<string, unknown> & {
   "recording.systemDevice": string | null;
   "models.whisper": string | null;
   "models.ai": string | null;
+  "notes.enabled": boolean;
   "speakers.diarization": boolean;
   "speakers.recognition": boolean;
   "speakers.inferNames": boolean;
@@ -444,7 +474,7 @@ export interface LiveStatus {
 }
 
 export interface ProcessesInfo {
-  jobs: { meetingId: string; title: string; state: "queued" | "running"; stage: string | null; progress: number | null; startedAt: number | null; stages: Record<string, StageState> }[];
+  jobs: { meetingId: string; title: string; state: "queued" | "running" | "cancelling"; stage: string | null; progress: number | null; startedAt: number | null; stages: Record<string, StageState> }[];
   live: (LiveStatus & { recordingId: string })[];
   downloads: DownloadProgress[];
 }

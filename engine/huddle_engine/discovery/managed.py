@@ -11,8 +11,9 @@ import time
 from pathlib import Path
 
 from ..schemas import LocalModel, ProviderStatus
-from .common import RUNTIME_LLAMACPP, gguf_quant_from_name, llm_family_from_name
+from .common import RUNTIME_LLAMACPP, RUNTIME_SHERPA, gguf_quant_from_name, llm_family_from_name
 from .hf_cache import _snapshot, classify_repo
+from .hf_layout import dereference_snapshot
 
 
 def _scan_models_dir(models_dir: Path, source: str, managed: bool) -> list[LocalModel]:
@@ -23,9 +24,20 @@ def _scan_models_dir(models_dir: Path, source: str, managed: bool) -> list[Local
             repo_id = repo_dir.name[len("models--"):].replace("--", "/")
             snap = _snapshot(repo_dir)
             if snap:
+                if managed:
+                    dereference_snapshot(snap)   # heals a Windows snapshot whose links went dead
                 for m in classify_repo(repo_id, snap, source=source):
                     m.externally_managed = not managed
                     out.append(m)
+    pdir = models_dir / "parakeet"
+    if pdir.exists():
+        from ..providers.parakeet_onnx import is_model_dir
+        for d in sorted(p for p in pdir.iterdir() if p.is_dir() and is_model_dir(p)):
+            size = sum(f.stat().st_size for f in d.iterdir() if f.is_file())
+            out.append(LocalModel(id=f"{source}:parakeet/{d.name}", name=d.name, family="parakeet", task="transcription",
+                                  source=source, format="ONNX", path=str(d), size_bytes=size, externally_managed=not managed,
+                                  compatible_runtimes=[RUNTIME_SHERPA], compatible=True,
+                                  meta={"parakeet": True, "languages": 25}))
     ldir = models_dir / "llm"
     if ldir.exists():
         for g in ldir.rglob("*.gguf"):

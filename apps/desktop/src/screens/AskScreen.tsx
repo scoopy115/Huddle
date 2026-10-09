@@ -3,7 +3,7 @@ import { MessageSquareText, Send } from "lucide-react";
 import { api, errorMessage } from "@/lib/api";
 import type { Meeting, Project, SearchHit } from "@/types/engine";
 import { fmtTime } from "@/lib/format";
-import { AI_MISSING_HINT, useNav } from "@/lib/nav";
+import { aiHint, useNav } from "@/lib/nav";
 import { Button, Input, Select, Spinner } from "@/components/ui";
 
 interface Turn { role: "user" | "assistant"; text: string; sources?: SearchHit[]; error?: boolean }
@@ -62,7 +62,7 @@ export function AskScreen({ meetings }: { meetings: Meeting[] }) {
         <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 pb-16 text-center">
           <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-fg/10 text-muted"><MessageSquareText className="h-6 w-6" /></div>
           <div className="font-display text-[17px] font-bold tracking-tight">Ask needs an AI model</div>
-          <p className="max-w-md text-[13px] text-muted">{AI_MISSING_HINT} Transcripts and search keep working without one.</p>
+          <p className="max-w-md text-[13px] text-muted">{aiHint(ai)} Transcripts and search keep working without one.</p>
           <Button variant="primary" size="sm" onClick={() => go({ kind: "settings", section: "models:summaries" })}>Open Models</Button>
         </div>
       </div>

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Check, Mic, Monitor } from "lucide-react";
 import { native, type MicPermission, type SystemAudioSupport } from "@/lib/native";
 import { Button } from "@/components/ui";
+import { isMac } from "@/lib/utils";
 
 export interface PermissionState { mic: MicPermission; system: SystemAudioSupport | null; checking: boolean }
 
@@ -45,10 +46,10 @@ export function PermissionsPanel({ perms, compact = false }: { perms: ReturnType
         <Mic className="h-4 w-4 shrink-0 text-muted" />
         <div className="min-w-0 flex-1">
           <div className="text-[13.5px] font-medium">Microphone</div>
-          <div className="text-[12px] text-muted">{micOk ? "Allowed" : perms.mic === "denied" ? "Turned off. Allow Huddle under Privacy & Security → Microphone." : "Needed for every recording."}</div>
+          <div className="text-[12px] text-muted">{micOk ? "Allowed" : perms.mic === "denied" ? (isMac ? "Turned off. Allow Huddle under Privacy & Security → Microphone." : "Turned off. Allow apps to use the microphone under Settings → Privacy & security → Microphone.") : "Needed for every recording."}</div>
         </div>
         {micOk ? <Check className="h-4 w-4 text-emerald-600" />
-          : perms.mic === "denied" ? <Button size="sm" onClick={() => native.openMicrophoneSettings()}>Open System Settings</Button>
+          : perms.mic === "denied" ? <Button size="sm" onClick={() => native.openMicrophoneSettings()}>{isMac ? "Open System Settings" : "Open Settings"}</Button>
           : <Button size="sm" variant="primary" loading={busy} onClick={askMic}>Allow</Button>}
       </div>
       <div className={row}>
@@ -56,8 +57,8 @@ export function PermissionsPanel({ perms, compact = false }: { perms: ReturnType
         <div className="min-w-0 flex-1">
           <div className="text-[13.5px] font-medium">System audio</div>
           <div className="text-[12px] text-muted">
-            {!sysSupported ? (perms.system?.message ?? "Needs macOS 14.2 or newer.")
-              : sysOk ? "Allowed"
+            {!sysSupported ? (perms.system?.message ?? "Not available on this computer.")
+              : sysOk ? (isMac ? "Allowed" : "No permission needed.")
               : sysUnknown ? "Checking…"
               : "Turned off. Allow Huddle under Privacy & Security → System Audio Recording."}
           </div>

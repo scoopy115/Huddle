@@ -1,5 +1,6 @@
 import * as React from "react";
-import { AlertTriangle, ChevronDown, Loader2 } from "lucide-react";
+import * as RSelect from "@radix-ui/react-select";
+import { AlertTriangle, Check, ChevronDown, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { sounds } from "@/lib/sounds";
 
@@ -58,22 +59,69 @@ export const Input = React.forwardRef<HTMLInputElement, React.InputHTMLAttribute
 );
 Input.displayName = "Input";
 
-/** An obvious dropdown: bordered field with a chevron, one fixed width everywhere in Settings. */
-export function Select({ className, children, wide, ...props }: React.SelectHTMLAttributes<HTMLSelectElement> & { wide?: boolean }) {
+/** An obvious dropdown: bordered field with a chevron, one fixed width everywhere in Settings.
+ *  Takes `<option>` children and reports `onChange` like a native select, but the list is drawn by
+ *  Radix in the app's own style (the system's native popup looked foreign, most of all on Windows). */
+const EMPTY_VALUE = "\u0000";   // Radix reserves "" for "nothing selected"; callers use "" freely
+type Option = { value: string; label: React.ReactNode; disabled?: boolean };
+function collectOptions(children: React.ReactNode, out: Option[] = []): Option[] {
+  React.Children.forEach(children, (c) => {
+    if (!React.isValidElement(c)) return;
+    const props = c.props as React.OptionHTMLAttributes<HTMLOptionElement> & { children?: React.ReactNode };
+    if (c.type === "option") out.push({ value: String(props.value ?? props.children ?? ""), label: props.children, disabled: props.disabled });
+    else collectOptions(props.children, out);   // fragments, optgroups, arrays
+  });
+  return out;
+}
+export function Select({ className, children, wide, value, onChange, disabled, id, title }: React.SelectHTMLAttributes<HTMLSelectElement> & { wide?: boolean }) {
+  const options = collectOptions(children);
+  const encode = (v: string) => (v === "" ? EMPTY_VALUE : v);
+  const decode = (v: string) => (v === EMPTY_VALUE ? "" : v);
+  const current = value == null ? "" : String(value);
   return (
-    <div className={cn("relative", wide ? "w-[300px]" : "w-[240px]", className)}>
-      <select
+    <RSelect.Root
+      value={encode(current)}
+      onValueChange={(v) => onChange?.({ target: { value: decode(v) } } as unknown as React.ChangeEvent<HTMLSelectElement>)}
+      disabled={disabled}
+    >
+      <RSelect.Trigger
+        id={id}
+        title={title}
         className={cn(
-          "h-8 w-full appearance-none rounded-lg border border-border bg-surface pl-2.5 pr-8 text-[13px] shadow-sm",
-          "hover:border-fg/25 focus:border-accent/60 focus:outline-none focus:ring-2 focus:ring-accent/20",
+          "flex h-8 items-center justify-between gap-2 rounded-lg border border-border bg-surface pl-2.5 pr-2 text-left text-[13px] shadow-sm",
+          "hover:border-fg/25 focus:border-accent/60 focus:outline-none focus:ring-2 focus:ring-accent/20 data-[state=open]:border-accent/60",
           "disabled:opacity-50",
+          wide ? "w-[300px]" : "w-[240px]",
+          className,
         )}
-        {...props}
       >
-        {children}
-      </select>
-      <ChevronDown className="pointer-events-none absolute right-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted" />
-    </div>
+        <span className="min-w-0 flex-1 truncate"><RSelect.Value /></span>
+        <RSelect.Icon><ChevronDown className="h-3.5 w-3.5 shrink-0 text-muted" /></RSelect.Icon>
+      </RSelect.Trigger>
+      <RSelect.Portal>
+        <RSelect.Content
+          position="popper"
+          sideOffset={4}
+          className="z-[70] max-h-[min(360px,var(--radix-select-content-available-height))] min-w-[var(--radix-select-trigger-width)] overflow-hidden rounded-lg border border-border bg-surface shadow-lg"
+        >
+          <RSelect.ScrollUpButton className="flex h-6 items-center justify-center text-muted"><ChevronDown className="h-3.5 w-3.5 rotate-180" /></RSelect.ScrollUpButton>
+          <RSelect.Viewport className="p-1">
+            {options.map((o) => (
+              <RSelect.Item
+                key={o.value}
+                value={encode(o.value)}
+                disabled={o.disabled}
+                className="relative flex cursor-default select-none items-center rounded-md py-1.5 pl-2.5 pr-7 text-[13px] outline-none data-[highlighted]:bg-fg/10 data-[disabled]:opacity-50"
+              >
+                <RSelect.ItemText>{o.label}</RSelect.ItemText>
+                <RSelect.ItemIndicator className="absolute right-2 inline-flex"><Check className="h-3.5 w-3.5 text-accent" /></RSelect.ItemIndicator>
+              </RSelect.Item>
+            ))}
+          </RSelect.Viewport>
+          <RSelect.ScrollDownButton className="flex h-6 items-center justify-center text-muted"><ChevronDown className="h-3.5 w-3.5" /></RSelect.ScrollDownButton>
+        </RSelect.Content>
+      </RSelect.Portal>
+    </RSelect.Root>
   );
 }
 

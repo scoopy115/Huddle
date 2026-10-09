@@ -320,7 +320,9 @@ def _notes_language(ctx: StageContext, meeting) -> str:
 def _llm_provider(ctx: StageContext):
     res = resolve_llm(ctx.resolver())
     if res.status == "ready" and res.model:
-        return OllamaProvider(res.model.name), res
+        p = OllamaProvider(res.model.name)
+        p.cancelled = ctx.cancelled   # a cancel interrupts the answer at the next token
+        return p, res
     if res.status == "unavailable" and res.model:
         raise ProviderError(res.reason)
     return ExtractiveProvider(), res
@@ -351,6 +353,15 @@ def _apply_inferred_names(ctx: StageContext, provider, plain: list[Segment]) -> 
     return n
 
 
+def _suggest_project(ctx: StageContext) -> None:
+    """The project suggestion without a model (keyword overlap), for meetings that get no notes."""
+    try:
+        from ..services import projects
+        projects.suggest(ctx.db, ctx.meeting_id, None)
+    except Exception:
+        log.exception("project suggestion failed")
+
+
 def summarizing(ctx: StageContext) -> str:
     if "remote_processing" in ctx.run_stages:
         row = ctx.db.one("SELECT provider FROM summaries WHERE meeting_id = ?", (ctx.meeting_id,))
@@ -359,6 +370,10 @@ def summarizing(ctx: StageContext) -> str:
     segs, plain = _plain_segments(ctx)
     if not segs:
         raise ProviderError("There is no transcript to summarise yet.")
+    if not ctx.settings.get("notes.enabled", True):
+        # Transcript only, by choice: no model is loaded and existing notes stay as they are.
+        _suggest_project(ctx)
+        raise StageSkipped("AI notes are turned off in Settings")
     provider, res = _llm_provider(ctx)
     ctx.report(0.1)
     inferred = _apply_inferred_names(ctx, provider, plain)
@@ -367,11 +382,7 @@ def summarizing(ctx: StageContext) -> str:
     if isinstance(provider, ExtractiveProvider):
         # No AI model: no notes at all rather than keyword-picked sentences dressed up as a
         # summary. Existing notes are left untouched; the transcript stays as it is.
-        try:
-            from ..services import projects
-            projects.suggest(ctx.db, ctx.meeting_id, None)
-        except Exception:
-            log.exception("project suggestion failed")
+        _suggest_project(ctx)
         raise StageSkipped("Needs a local AI model")
     names = transcripts.speaker_names(ctx.db, ctx.meeting_id)
     meeting = ms.get_meeting(ctx.db, ctx.meeting_id)

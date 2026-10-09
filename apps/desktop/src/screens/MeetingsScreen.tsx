@@ -12,7 +12,7 @@ const ALL = "";
 const NONE = "__none__";
 
 export function MeetingsScreen({ meetings, loading, onImport, onChanged }: { meetings: Meeting[] | null; loading: boolean; onImport: () => void; onChanged: () => void }) {
-  const { go } = useNav();
+  const { go, ai } = useNav();
   const [filter, setFilter] = useState("");
   const [project, setProject] = useState(ALL);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -59,7 +59,7 @@ export function MeetingsScreen({ meetings, loading, onImport, onChanged }: { mee
           <EmptyState
             icon={<Mic className="h-6 w-6" />}
             title="No meetings yet"
-            body="Put your Mac on the table, press New Recording, and Huddle will transcribe and summarise the conversation."
+            body={ai.ready ? "Press New Recording and Huddle transcribes the conversation and writes the notes." : "Press New Recording and Huddle transcribes the conversation."}
             action={<Button variant="record" onClick={() => go({ kind: "record" })}><Mic className="h-4 w-4" /> New Recording</Button>}
           />
         ) : !list.length ? (

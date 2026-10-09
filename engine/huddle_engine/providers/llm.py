@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import traceback
+from collections.abc import Callable
 
 import httpx
 
@@ -19,6 +20,10 @@ OLLAMA_URL = os.getenv("HUDDLE_OLLAMA_URL", "").rstrip("/") or "http://127.0.0.1
 LMSTUDIO_URL = "http://127.0.0.1:1234"
 
 
+class LlmCancelled(Exception):
+    """The job was cancelled while the model was answering (see OllamaProvider.cancelled)."""
+
+
 class OllamaProvider:
     id = "ollama"
 
@@ -26,6 +31,9 @@ class OllamaProvider:
         self.model = model
         self._base_url = base_url.rstrip("/") if base_url else None
         self.num_ctx = num_ctx
+        # Set by the job runner: polled between tokens so a cancel does not wait for the whole
+        # answer (a summary can take a minute).
+        self.cancelled: Callable[[], bool] | None = None
 
     @property
     def base_url(self) -> str:
@@ -40,20 +48,22 @@ class OllamaProvider:
         body = {
             "model": self.model,
             "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
-            "stream": False,
+            "stream": True,
             "options": {"temperature": 0.2, "num_predict": max_tokens, "num_ctx": self.num_ctx},
             "think": False,
         }
         if json_mode:
             body["format"] = "json"
         try:
-            r = httpx.post(f"{self.base_url}/api/chat", json=body, timeout=900)
-            if r.status_code == 400 and "think" in r.text:
-                body.pop("think", None)          # older Ollama without the think flag
-                r = httpx.post(f"{self.base_url}/api/chat", json=body, timeout=900)
-            r.raise_for_status()
-            data = r.json()
-            return data["message"]["content"]
+            try:
+                return self._stream(body)
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code == 400 and "think" in e.response.text:
+                    body.pop("think", None)          # older Ollama without the think flag
+                    return self._stream(body)
+                raise
+        except LlmCancelled:
+            raise
         except httpx.ConnectError as e:
             raise ProviderError("The local AI runtime stopped responding. Try again; Huddle restarts it when needed.",
                                 detail=str(e)) from e
@@ -62,6 +72,29 @@ class OllamaProvider:
                                 detail=e.response.text[:2000]) from e
         except Exception as e:
             raise ProviderError("Ollama request failed.", detail=traceback.format_exc()) from e
+
+    def _stream(self, body: dict) -> str:
+        """One /api/chat call, token by token (NDJSON); the pieces are joined at the end."""
+        parts: list[str] = []
+        with httpx.stream("POST", f"{self.base_url}/api/chat", json=body, timeout=httpx.Timeout(900, connect=30)) as r:
+            if r.status_code >= 400:
+                r.read()
+                r.raise_for_status()
+            for line in r.iter_lines():
+                if not line:
+                    continue
+                if self.cancelled and self.cancelled():
+                    raise LlmCancelled()
+                try:
+                    item = json.loads(line)
+                except ValueError:
+                    continue
+                if item.get("error"):
+                    raise ProviderError(f"Ollama could not run '{self.model}'.", detail=str(item["error"]))
+                parts.append((item.get("message") or {}).get("content") or "")
+                if item.get("done"):
+                    break
+        return "".join(parts)
 
     def complete_json(self, system: str, user: str, max_tokens: int = 2048) -> str:
         return self._chat(system, user, max_tokens, json_mode=True)

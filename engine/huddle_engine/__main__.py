@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import logging
 import sys
@@ -17,6 +18,11 @@ from pathlib import Path
 
 def _logging(cfg) -> None:
     cfg.ensure_dirs()
+    # Windows gives a redirected stderr the ANSI code page, so a title with a character outside
+    # it would make every log line about it fail; write UTF-8 and never raise.
+    if hasattr(sys.stderr, "reconfigure"):
+        with contextlib.suppress(ValueError, OSError):
+            sys.stderr.reconfigure(encoding="utf-8", errors="replace")
     fmt = "%(asctime)s %(levelname)s %(name)s: %(message)s"
     handlers = [logging.StreamHandler(sys.stderr),
                 logging.FileHandler(cfg.logs_dir / "engine.log", encoding="utf-8")]
@@ -36,18 +42,36 @@ def _parent_watchdog() -> None:
         return
     parent = int(raw)
 
+    def alive() -> bool:
+        # On Windows os.kill(pid, 0) is TerminateProcess, not a probe: it would kill the app.
+        # Wait on a process handle instead (WAIT_TIMEOUT = still running).
+        if os.name == "nt":
+            import ctypes
+            k32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
+            SYNCHRONIZE = 0x00100000
+            h = k32.OpenProcess(SYNCHRONIZE, False, parent)
+            if not h:
+                return False
+            try:
+                return k32.WaitForSingleObject(h, 0) == 0x00000102  # WAIT_TIMEOUT
+            finally:
+                k32.CloseHandle(h)
+        try:
+            os.kill(parent, 0)
+            return True
+        except ProcessLookupError:
+            return False
+        except PermissionError:
+            return True   # exists, but not ours to signal
+
     def loop():
         while True:
             time.sleep(2)
-            try:
-                os.kill(parent, 0)
-            except ProcessLookupError:
+            if not alive():
                 logging.getLogger("huddle").warning("parent app %d is gone — shutting down engine", parent)
                 from .providers import ollama_runtime
                 ollama_runtime.stop()
                 os._exit(0)
-            except PermissionError:
-                pass   # exists, but not ours to signal
 
     threading.Thread(target=loop, name="huddle-parent-watchdog", daemon=True).start()
 

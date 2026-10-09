@@ -18,7 +18,7 @@ use tauri_plugin_positioner::{Position, WindowExt};
 pub const TRAY_ID: &str = "huddle-tray";
 /// Label of the popover window (declared in tauri.conf.json, hidden until the icon is clicked).
 pub const POPOVER: &str = "tray";
-pub const SHORTCUT_LABEL: &str = "⌥⌘R";
+pub const SHORTCUT_LABEL: &str = if cfg!(target_os = "macos") { "⌥⌘R" } else { "Ctrl+Alt+R" };
 
 fn record_label(recording: bool) -> String {
     if recording { format!("Stop Recording\t{SHORTCUT_LABEL}") } else { format!("Start Recording\t{SHORTCUT_LABEL}") }
@@ -201,9 +201,34 @@ fn theme_is_dark(app: &AppHandle) -> bool {
 
 /// `set_icon` alone would install the new image as a non-template one (the flag belongs to the
 /// image, not the tray), which rendered every template frame black; set both together.
+#[cfg(target_os = "macos")]
 fn show(tray: &tauri::tray::TrayIcon, bytes: &[u8], template: bool) {
     let _ = tray.set_icon_with_as_template(Image::from_bytes(bytes).ok(), template);
 }
+
+/// Windows and Linux have no template images: the black "h" frames would vanish on a dark
+/// taskbar, so template frames are recoloured white there when the system theme is dark.
+#[cfg(not(target_os = "macos"))]
+fn show(tray: &tauri::tray::TrayIcon, bytes: &[u8], template: bool) {
+    let Ok(img) = Image::from_bytes(bytes) else { return };
+    let dark = DARK_TASKBAR.load(std::sync::atomic::Ordering::Relaxed);
+    if template && dark {
+        let mut rgba = img.rgba().to_vec();
+        for px in rgba.chunks_exact_mut(4) {
+            if px[3] > 0 {
+                px[0] = 255;
+                px[1] = 255;
+                px[2] = 255;
+            }
+        }
+        let _ = tray.set_icon(Some(Image::new_owned(rgba, img.width(), img.height())));
+    } else {
+        let _ = tray.set_icon(Some(img));
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+static DARK_TASKBAR: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 fn animate(app: AppHandle) {
     let mut frame = 0usize;
@@ -216,6 +241,8 @@ fn animate(app: AppHandle) {
         if !recording && !busy {
             if !idle_shown {
                 on_main(&app, |app| {
+                    #[cfg(not(target_os = "macos"))]
+                    DARK_TASKBAR.store(theme_is_dark(app), std::sync::atomic::Ordering::Relaxed);
                     if let Some(tray) = app.tray_by_id(TRAY_ID) {
                         show(&tray, ICON_BASE, true);
                     }
@@ -233,6 +260,8 @@ fn animate(app: AppHandle) {
                 let Some(tray) = app.tray_by_id(TRAY_ID) else { return };
                 if on {
                     let dark = menu_bar_is_dark().unwrap_or_else(|| theme_is_dark(app));
+                    #[cfg(not(target_os = "macos"))]
+                    DARK_TASKBAR.store(dark, std::sync::atomic::Ordering::Relaxed);
                     if !LOGGED_APPEARANCE.swap(true, std::sync::atomic::Ordering::Relaxed) {
                         log::info!("menu bar appearance: {}", if dark { "dark" } else { "light" });
                     }

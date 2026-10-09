@@ -1,0 +1,16 @@
+{
+  "bundle": {
+    "targets": [
+      "dmg",
+      "app"
+    ],
+    "macOS": {
+      "minimumSystemVersion": "14.2",
+      "entitlements": "entitlements/app.plist",
+      "hardenedRuntime": true
+    },
+    "externalBin": [
+      "binaries/huddle-audio-tap"
+    ]
+  }
+}

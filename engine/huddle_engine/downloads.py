@@ -83,8 +83,12 @@ class DownloadManager:
     # ---- workers ------------------------------------------------------------ #
     def _run(self, cand: DownloadCandidate) -> None:
         try:
-            if cand.task == "transcription":
+            if cand.id.startswith("parakeet:onnx-"):
+                model_id = self._download_parakeet_onnx(cand)
+            elif cand.task == "transcription":
                 model_id = self._download_whisper(cand)
+                if cand.id.startswith("whisper:cuda-"):
+                    self._install_cuda(cand, offset=cand.size_bytes)
             else:
                 model_id = self._pull_ollama(cand)
             self.registry.quick_check()
@@ -113,9 +117,57 @@ class DownloadManager:
         root.mkdir(parents=True, exist_ok=True)
         path = snapshot_download(cand.url, cache_dir=str(root), tqdm_class=_Progress,
                                  allow_patterns=["*.bin", "*.json", "*.txt", "*.npz", "*.safetensors", "*.model", "*.vocab"])
+        from .discovery.hf_layout import dereference_snapshot
+        dereference_snapshot(Path(path))   # Windows: plain files where symlinks would not open
         size = sum(p.stat().st_size for p in Path(path).rglob("*") if p.is_file())
         self._update(cid, received_bytes=size, total_bytes=size)
         return f"our_app:{cand.url}"
+
+    def _install_cuda(self, cand: DownloadCandidate, offset: int = 0) -> None:
+        """cuBLAS after the model of a GPU bundle; progress continues past the model's bytes."""
+        from .providers import cuda_runtime
+        if cuda_runtime.installed():
+            return
+        self._update(cand.id, total_bytes=offset + cuda_runtime.WHEEL_SIZE, received_bytes=offset)
+        try:
+            cuda_runtime.install(progress=lambda r, t: self._update(cand.id, received_bytes=offset + r, total_bytes=offset + (t or cuda_runtime.WHEEL_SIZE)),
+                                 cancelled=lambda: cand.id in self._cancel)
+        except InterruptedError:
+            raise _Cancelled() from None
+
+    def _download_parakeet_onnx(self, cand: DownloadCandidate) -> str:
+        """The sherpa-onnx export: a .tar.bz2 unpacked into <models>/parakeet/<name>/ (model files only)."""
+        import tarfile
+
+        from .providers import parakeet_onnx as po
+        dest = self.models_dir / "parakeet" / po.ARCHIVE_NAME
+        dest.mkdir(parents=True, exist_ok=True)
+        archive = dest.parent / (po.ARCHIVE_NAME + ".tar.bz2.part")
+        received = 0
+        with httpx.stream("GET", cand.url, follow_redirects=True, timeout=httpx.Timeout(30, read=120)) as r, open(archive, "wb") as f:
+            r.raise_for_status()
+            total = int(r.headers.get("content-length") or 0) or cand.size_bytes
+            self._update(cand.id, total_bytes=total, received_bytes=0)
+            for chunk in r.iter_bytes(1 << 20):
+                if cand.id in self._cancel:
+                    raise _Cancelled()
+                f.write(chunk)
+                received += len(chunk)
+                self._update(cand.id, received_bytes=received, total_bytes=total)
+        self._update(cand.id, state="verifying")
+        try:
+            with tarfile.open(archive, "r:bz2") as tar:
+                for member in tar.getmembers():
+                    name = member.name.rsplit("/", 1)[-1]
+                    if member.isfile() and name in po.MODEL_FILES:
+                        with tar.extractfile(member) as src, open(dest / name, "wb") as out:
+                            while block := src.read(1 << 20):
+                                out.write(block)
+        finally:
+            archive.unlink(missing_ok=True)
+        if not po.is_model_dir(dest):
+            raise RuntimeError("The Parakeet archive did not contain the expected model files.")
+        return f"our_app:parakeet/{po.ARCHIVE_NAME}"
 
     def _pull_ollama(self, cand: DownloadCandidate) -> str:
         name = cand.url

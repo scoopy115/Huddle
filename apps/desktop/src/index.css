@@ -224,3 +224,14 @@ input[type="number"] {
 
 /* Menu-bar popover: the window is transparent, the panel draws its own shape. */
 html.tray, html.tray body, html.tray #root { background: transparent; overflow: hidden; }
+
+/* macOS overlays the traffic lights on the page, so a spacer keeps content clear of them.
+   Linux draws a native title bar above the page: no spacer. Windows has no native title bar
+   either (the shell removes it; WindowControls.tsx draws minimize/maximize/close in the top-right
+   corner): the spacer is the controls' height, and a screen header that reaches the right edge
+   keeps its buttons clear of them. */
+html[data-os="linux"] .titlebar-space { height: 0; }
+html[data-os="windows"] .titlebar-space { height: 2rem; }
+/* The screens sit below a strip of that height (App.tsx); a side column with its own background
+   reaches up into the strip so it runs to the top edge like the sidebar does. */
+html[data-os="windows"] .settings-nav { margin-top: -2rem; padding-top: 2rem; }

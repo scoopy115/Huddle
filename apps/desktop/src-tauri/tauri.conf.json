@@ -54,24 +54,12 @@
   },
   "bundle": {
     "active": true,
-    "targets": [
-      "dmg",
-      "app"
-    ],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ],
-    "macOS": {
-      "minimumSystemVersion": "14.2",
-      "entitlements": "entitlements/app.plist",
-      "hardenedRuntime": true
-    },
-    "externalBin": [
-      "binaries/huddle-audio-tap"
     ],
     "resources": {
       "../../../engine/dist.nosync/huddle-engine/": "engine/",

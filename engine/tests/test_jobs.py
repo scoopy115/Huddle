@@ -203,3 +203,28 @@ def test_migration_removes_fallback_notes(tmp_path):
     assert q("SELECT meeting_id FROM topics") == ["b"] and q("SELECT meeting_id FROM decisions") == ["b"]
     assert sorted(q("SELECT text FROM action_items")) == ["mine", "real", "ticked"]
     assert q("SELECT COUNT(*) FROM transcript_segments") == [2]
+
+
+def test_notes_turned_off_skips_the_summary_without_loading_a_model(db, cfg, monkeypatch):
+    """notes.enabled = False: transcript and speakers only. The AI provider is never resolved."""
+    _meeting(db, cfg)
+    with db.tx() as c:
+        sp = c.execute("INSERT INTO meeting_speakers(meeting_id,label) VALUES ('m1','Speaker 1')").lastrowid
+        c.execute("INSERT INTO transcript_segments(meeting_id,meeting_speaker_id,idx,start,\"end\",text) VALUES ('m1',?,0,0,2,?)",
+                  (sp, "We decided to launch the new homepage next Monday."))
+    def boom(ctx):
+        raise AssertionError("the AI provider must not be touched when notes are off")
+    monkeypatch.setattr(st, "_llm_provider", boom)
+    fakes = {n: (lambda ctx: "ok") for n in STAGES if n not in ("preprocessing", "summarizing")}
+    r = _runner(db, cfg, fakes)
+    r.settings_fn = lambda: {"notes.enabled": False}
+    try:
+        r.enqueue("m1")
+        r._run("m1", ["summarizing", "indexing"])
+    finally:
+        _restore()
+    job = ms.get_job(db, "m1")
+    assert job.stages["summarizing"].status == "skipped"
+    assert job.stages["summarizing"].detail == "AI notes are turned off in Settings"
+    assert job.state == "ready"
+    assert ms.get_summary(db, "m1") is None

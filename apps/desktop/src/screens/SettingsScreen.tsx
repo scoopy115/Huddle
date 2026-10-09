@@ -8,11 +8,11 @@ import { checkForUpdates, useUpdates } from "@/lib/updates";
 import { api, errorMessage } from "@/lib/api";
 import { native, type AppInfo, type EngineStatus, type InputDevice } from "@/lib/native";
 import { PermissionsPanel, usePermissions } from "@/components/PermissionsPanel";
-import { useNav } from "@/lib/nav";
+import { aiHint, useNav } from "@/lib/nav";
 import type { DownloadCandidate, DownloadProgress, Environment, KnownSpeaker, LocalModel, Resolution, StorageInfo, UserSettings } from "@/types/engine";
 import { fmtBytes, languageName } from "@/lib/format";
 import { languageOptions, systemLanguage } from "@/lib/languages";
-import { cn, modKey } from "@/lib/utils";
+import { cn, fileManager, isMac, platformName, recordShortcut, trayName } from "@/lib/utils";
 import { Badge, Button, Card, DangerDialog, Dialog, InfoTip, Row, Select, Switch } from "@/components/ui";
 import { McpSection } from "@/screens/settings/McpSection";
 import { ServerSection } from "@/screens/settings/ServerSection";
@@ -62,7 +62,7 @@ export function SettingsScreen({ section, engine }: { section?: string; engine: 
 
   return (
     <div className="flex h-full">
-      <nav className="w-[180px] shrink-0 border-r border-border bg-sidebar/60">
+      <nav className="settings-nav w-[180px] shrink-0 border-r border-border bg-sidebar/60">
         <div data-tauri-drag-region className="titlebar-drag h-[52px] flex items-center px-4"><span data-tauri-drag-region className="page-title">Settings</span></div>
         <ul className="px-2">
           {SECTIONS.map((s) => (
@@ -105,18 +105,23 @@ const autoLabel = (pick: string | undefined) => (pick ? `Automatic (${pick})` : 
 function sourceLabel(s: string) {
   return ({ our_app: "Huddle", ollama: "Ollama", lm_studio: "LM Studio", huggingface: "Hugging Face cache", whisper_cpp: "whisper.cpp", whisperkit: "WhisperKit", mlx: "MLX", custom: "Custom" } as Record<string, string>)[s] ?? s;
 }
-/** "Whisper large-v3-turbo (Apple Silicon)" / "(CPU)": the runtime is part of the name, as in the marketplace. */
-const modelTitle = (m: LocalModel) => {
+/** "Whisper large-v3-turbo (Apple Silicon)" / "(CPU)" / "(NVIDIA GPU)": the runtime is part of the
+ *  name, as in the marketplace. `gpu`: CTranslate2 models run on the NVIDIA card here (cuBLAS in place). */
+const modelTitle = (m: LocalModel, gpu = false) => {
   if (m.task === "transcription" && m.family === "parakeet") {
-    // "mlx-community/parakeet-tdt-0.6b-v3" → "Parakeet TDT 0.6B v3 (Apple Silicon)"
+    // "mlx-community/parakeet-tdt-0.6b-v3" → "Parakeet TDT 0.6B v3 (Apple Silicon)";
+    // "sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8" (ONNX, PCs) → "Parakeet TDT 0.6B v3 (CPU)"
     const tail = m.name.split("/").pop() ?? m.name;
-    const pretty = tail.replace(/^parakeet-/i, "").replace(/-/g, " ").replace(/\b(tdt|ctc|rnnt)\b/gi, (x) => x.toUpperCase()).replace(/(\d+\.\d+)b\b/i, "$1B");
-    return `Parakeet ${pretty} (Apple Silicon)`;
+    const pretty = tail.replace(/^.*?parakeet-/i, "").replace(/-int8$/i, "").replace(/-/g, " ").replace(/\b(tdt|ctc|rnnt)\b/gi, (x) => x.toUpperCase()).replace(/(\d+\.\d+)b\b/i, "$1B");
+    return `Parakeet ${pretty} (${m.format === "ONNX" ? "CPU" : "Apple Silicon"})`;
   }
   if (m.task !== "transcription" || !m.meta.whisperSize) return m.name;
-  const runtime = m.format === "MLX" ? "Apple Silicon" : m.format === "CTranslate2" ? "CPU" : m.format;
+  const runtime = m.format === "MLX" ? "Apple Silicon" : m.format === "CTranslate2" ? (gpu ? "NVIDIA GPU" : "CPU") : m.format;
   return `Whisper ${m.meta.whisperSize}${runtime ? ` (${runtime})` : ""}`;
 };
+
+/** CTranslate2 can use the NVIDIA card: the engine lists CUDA as an available compute device. */
+const cudaReady = (env: Environment) => env.devices.some((d) => d.backend === "cuda" && d.available);
 
 function ComputeSelect({ env, value, onChange }: { env: Environment; value: string; onChange: (v: string) => void }) {
   const rec = env.devices.find((d) => d.recommended && d.available);
@@ -138,6 +143,7 @@ function useSystemDark() {
 // ---- General --------------------------------------------------------------------------------------
 
 function General({ settings, update }: { settings: UserSettings; update: Update }) {
+  const { ai } = useNav();
   const [storage, setStorage] = useState<StorageInfo | null>(null);
   useEffect(() => { api.storage().then(setStorage).catch(() => {}); }, [settings]);
   const gb = Math.round((settings["storage.maxBytes"] || 10 * GB) / GB);
@@ -160,21 +166,6 @@ function General({ settings, update }: { settings: UserSettings; update: Update 
         </Row>
       </Card>
 
-      <h3 className="mb-2 mt-6 font-display text-[11.5px] font-bold uppercase tracking-wider text-muted">Menu bar</h3>
-      <Card>
-        <Row label="Keep Huddle in the menu bar" hint={`Closing the window keeps a small recorder in the menu bar. ${modKey}⌥R starts or stops a recording from anywhere.`}>
-          <Switch checked={!!settings["general.menuBar"]} onChange={(v) => update({ "general.menuBar": v })} />
-        </Row>
-      </Card>
-
-      <h3 className="mb-2 mt-6 font-display text-[11.5px] font-bold uppercase tracking-wider text-muted">Updates</h3>
-      <Card>
-        <Row label="Check for updates automatically">
-          <Switch checked={settings["general.autoUpdate"] !== false} onChange={(v) => update({ "general.autoUpdate": v })} />
-        </Row>
-        <UpdateRow />
-      </Card>
-
       <h3 className="mb-2 mt-6 font-display text-[11.5px] font-bold uppercase tracking-wider text-muted">Notes</h3>
       <Card>
         <Row label="Notes language" info="Summaries, decisions, action items and answers are written in this language. Spoken languages are always detected automatically.">
@@ -183,8 +174,18 @@ function General({ settings, update }: { settings: UserSettings; update: Update 
             {languageOptions().map((l) => <option key={l.code} value={l.code}>{l.name}</option>)}
           </Select>
         </Row>
-        <Row label="Find action items automatically" info="Off: action items are only extracted when you press “Find action items” on a meeting.">
-          <Switch checked={!!settings["notes.autoActionItems"]} onChange={(v) => update({ "notes.autoActionItems": v })} />
+        <Row label="Write AI notes" info="Off: a meeting gets its transcript with speakers and nothing else — no summary, topics or decisions, and no AI model is loaded while processing. Ask and Refine still need a model." hint={ai.ready ? undefined : aiHint(ai)}>
+          <Switch checked={ai.ready && settings["notes.enabled"] !== false} onChange={(v) => update({ "notes.enabled": v })} disabled={!ai.ready} />
+        </Row>
+        <Row label="Find action items automatically" info="Off: action items are only extracted when you press “Find action items” on a meeting." hint={ai.ready ? undefined : aiHint(ai)}>
+          <Switch checked={ai.ready && !!settings["notes.autoActionItems"]} onChange={(v) => update({ "notes.autoActionItems": v })} disabled={!ai.ready || settings["notes.enabled"] === false} />
+        </Row>
+      </Card>
+
+      <h3 className="mb-2 mt-6 font-display text-[11.5px] font-bold uppercase tracking-wider text-muted">{isMac ? "Menu bar" : "System tray"}</h3>
+      <Card>
+        <Row label={`Keep Huddle in the ${trayName}`} hint={`Closing the window keeps a small recorder in the ${trayName}. ${recordShortcut} starts or stops a recording from anywhere.`}>
+          <Switch checked={!!settings["general.menuBar"]} onChange={(v) => update({ "general.menuBar": v })} />
         </Row>
       </Card>
 
@@ -207,9 +208,17 @@ function General({ settings, update }: { settings: UserSettings; update: Update 
           )}
         </div>
         <Row label="Storage location" hint={storage?.dataDir ?? ""}>
-          <Button size="sm" onClick={() => storage && native.revealInFinder(storage.dataDir).catch(() => {})}><FolderOpen className="h-3.5 w-3.5" /> Show in Finder</Button>
+          <Button size="sm" onClick={() => storage && native.revealInFinder(storage.dataDir).catch(() => {})}><FolderOpen className="h-3.5 w-3.5" /> Show in {fileManager}</Button>
         </Row>
       </Card>
+      <h3 className="mb-2 mt-6 font-display text-[11.5px] font-bold uppercase tracking-wider text-muted">Updates</h3>
+      <Card>
+        <Row label="Check for updates automatically">
+          <Switch checked={settings["general.autoUpdate"] !== false} onChange={(v) => update({ "general.autoUpdate": v })} />
+        </Row>
+        <UpdateRow />
+      </Card>
+
     </>
   );
 }
@@ -247,11 +256,12 @@ function Recording({ settings, update }: { settings: UserSettings; update: Updat
 
 // ---- Models ---------------------------------------------------------------------------------------
 
-function CandidateRow({ c, progress, installed, memoryBytes, onStart, onCancel }: { c: DownloadCandidate; progress?: DownloadProgress; installed: boolean; memoryBytes?: number | null; onStart: () => void; onCancel: () => void }) {
+function CandidateRow({ c, progress, installed, onStart, onCancel }: { c: DownloadCandidate; progress?: DownloadProgress; installed: boolean; onStart: () => void; onCancel: () => void }) {
   const pct = progress && progress.totalBytes ? Math.round((progress.receivedBytes / progress.totalBytes) * 100) : 0;
   const active = progress && (progress.state === "downloading" || progress.state === "verifying");
-  // Greyed out when this Mac has less memory than the model needs; the row stays visible so the option is known.
-  const tooBig = !!c.minMemoryBytes && !!memoryBytes && memoryBytes < c.minMemoryBytes;
+  // The engine judged the fit for this computer (memory, graphics memory, CPU-only): a model that
+  // cannot run is greyed out but stays visible so the option is known; a slow one gets a warning.
+  const tooBig = c.fit === "no";
   return (
     <div className={cn("flex items-start gap-3 border-b border-border px-4 py-3 last:border-b-0", tooBig && !installed && "opacity-50")}>
       <div className="min-w-0 flex-1">
@@ -264,14 +274,14 @@ function CandidateRow({ c, progress, installed, memoryBytes, onStart, onCancel }
           <span className="inline-flex items-center gap-1"><Download className="h-3 w-3" />{c.sizeBytes ? fmtBytes(c.sizeBytes) : "size varies"}</span>
         </div>
         {c.description && <div className="mt-0.5 text-[12px] text-muted">{c.description}</div>}
-        {tooBig && !installed && <div className="mt-0.5 text-[12px] text-danger">Needs {fmtBytes(c.minMemoryBytes!)} of memory; this Mac has {fmtBytes(memoryBytes!)}.</div>}
+        {c.fitReason && !installed && <div className={cn("mt-0.5 text-[12px]", tooBig ? "text-danger" : "text-amber-600 dark:text-amber-400")}>{c.fitReason}</div>}
         {active && <div className="mt-1.5 h-1 w-full overflow-hidden rounded bg-fg/10"><div className="h-full bg-accent transition-all" style={{ width: `${pct}%` }} /></div>}
         {progress?.state === "failed" && <div className="mt-1 text-[12px] text-danger">{progress.error}</div>}
       </div>
       <div className="shrink-0">
         {installed ? <Badge tone="good"><Check className="h-3 w-3" /> Installed</Badge>
           : active ? <div className="flex items-center gap-2 text-[12px] text-muted">{progress.state === "verifying" ? "Finishing…" : `${pct}%`}<Button size="sm" variant="ghost" onClick={onCancel}>Cancel</Button></div>
-          : <Button size="sm" disabled={tooBig} title={tooBig ? "Not enough memory on this Mac" : undefined} onClick={onStart}><Download className="h-3.5 w-3.5" /> Download</Button>}
+          : <Button size="sm" disabled={tooBig} title={tooBig ? c.fitReason ?? undefined : undefined} onClick={onStart}><Download className="h-3.5 w-3.5" /> Download</Button>}
       </div>
     </div>
   );
@@ -281,13 +291,13 @@ const sourceOf = (m: LocalModel) => m.source === "ollama" ? (m.meta.pulledByHudd
   : m.source === "our_app" ? "Installed by Huddle" : m.source === "huggingface" ? "Found in Hugging Face cache" : sourceLabel(m.source);
 
 /** One installed model with its radio button; defined at module level so React keeps its state. */
-function ModelRow({ m, selectedKey, settings, update, onRemove, inUse }: { m: LocalModel; selectedKey: "models.whisper" | "models.ai"; settings: UserSettings; update: Update; onRemove: (m: LocalModel) => void; inUse: boolean }) {
+function ModelRow({ m, selectedKey, settings, update, onRemove, inUse, gpu = false }: { m: LocalModel; selectedKey: "models.whisper" | "models.ai"; settings: UserSettings; update: Update; onRemove: (m: LocalModel) => void; inUse: boolean; gpu?: boolean }) {
   return (
     <div className="flex items-center gap-3 border-b border-border px-4 py-3 last:border-b-0">
       <input type="radio" name={selectedKey} checked={settings[selectedKey] === m.id} onChange={() => update({ [selectedKey]: m.id } as Partial<UserSettings>)} className="accent-[rgb(var(--accent))]" />
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2 text-[13px] font-medium">
-          {modelTitle(m)}
+          {modelTitle(m, gpu)}
           {m.meta.recommended && <Badge tone="accent"><Star className="h-3 w-3" /> Recommended</Badge>}
           {inUse && <Badge tone="good"><Check className="h-3 w-3" /> In use</Badge>}
         </div>
@@ -317,11 +327,14 @@ function Models({ settings, env, resolutions, update, reload, initialTab }: { se
   const [downloads, setDownloads] = useState<DownloadProgress[]>([]);
   const [confirm, setConfirm] = useState<LocalModel | null>(null);
   const [scanning, setScanning] = useState(false);
-  useEffect(() => { api.candidates().then(setCands).catch(() => {}); }, []);
+  const refreshCands = () => api.candidates().then(setCands).catch(() => {});
+  useEffect(() => { refreshCands(); }, []);
   useEffect(() => {
     const t = setInterval(async () => {
       const d = await api.downloads().catch(() => []);
-      setDownloads((prev) => { if (prev.some((p) => p.state === "downloading") && d.some((x) => x.state === "done")) reload(); return d; });
+      // A finished download changes what is installed, so the marketplace rows (the engine's
+      // "installed" flags, names and sizes) are fetched again along with the inventory.
+      setDownloads((prev) => { if (prev.some((p) => p.state === "downloading" || p.state === "verifying") && d.some((x) => x.state === "done" || x.state === "failed")) { reload(); refreshCands(); } return d; });
     }, 1000);
     return () => clearInterval(t);
   }, [reload]);
@@ -333,15 +346,15 @@ function Models({ settings, env, resolutions, update, reload, initialTab }: { se
   // "Automatic (…)" names what Automatic would take, whatever is selected.
   const whisperRes = resolutions.find((r) => r.task === "transcription");
   const whisperAutoModel = whisperRes?.autoModel ?? whisperRes?.model;
-  const whisperAuto = whisperAutoModel ? modelTitle(whisperAutoModel) : undefined;
+  const whisperAuto = whisperAutoModel ? modelTitle(whisperAutoModel, cudaReady(env)) : undefined;
   const aiRes = resolutions.find((r) => r.task === "llm");
   const inUseIds = new Set(resolutions.map((r) => r.model?.id).filter(Boolean));
   const ollama = env.providers.find((p) => p.id === "ollama");
   // "Installed" means the model is actually usable: it appears in the inventory as a Huddle-managed
   // model. A snapshot folder alone is not enough — it exists from the first byte of a download.
-  const isInstalled = (c: DownloadCandidate) => c.task === "llm"
+  const isInstalled = (c: DownloadCandidate) => c.installed ?? (c.task === "llm"
     ? env.models.some((m) => m.source === "ollama" && m.name === c.url)
-    : env.models.some((m) => m.task === "transcription" && m.compatible && m.source === "our_app" && m.id === `our_app:${c.url}`);
+    : env.models.some((m) => m.task === "transcription" && m.compatible && m.source === "our_app" && m.id === `our_app:${c.url}`));
   const candsFor = (task: string) => [...cands.filter((c) => c.task === task)].sort((a, b) => Number(b.recommended) - Number(a.recommended));
   // Models Huddle pulled through Ollama are Huddle's (and removable); the rest belong to the user's Ollama.
 
@@ -353,7 +366,7 @@ function Models({ settings, env, resolutions, update, reload, initialTab }: { se
     ?? aiSorted.find((m) => m.meta.recommended) ?? cands.find((c) => c.task === "llm" && c.recommended);
   const usedWhisper = whisperAutoModel && !settings["models.whisper"] ? whisperAutoModel : whisper.find((m) => m.id === settings["models.whisper"]) ?? whisperAutoModel;
   const usedAi = settings["models.ai"] ? ai.find((m) => m.id === settings["models.ai"]) ?? aiRes?.model : aiRes?.model;
-  const nameOf = (x: LocalModel | DownloadCandidate | undefined) => !x ? "—" : "task" in x && "compatible" in x ? modelTitle(x as LocalModel) : (x as DownloadCandidate).name;
+  const nameOf = (x: LocalModel | DownloadCandidate | undefined) => !x ? "—" : "task" in x && "compatible" in x ? modelTitle(x as LocalModel, cudaReady(env)) : (x as DownloadCandidate).name;
   const installedFlag = (x: LocalModel | DownloadCandidate | undefined) => !!x && "compatible" in x;
 
 
@@ -361,20 +374,20 @@ function Models({ settings, env, resolutions, update, reload, initialTab }: { se
     <>
       <div className="mb-4 grid grid-cols-2 gap-3">
         <Card className="p-4">
-          <div className="mb-2 flex items-center gap-1.5 font-display text-[11.5px] font-bold uppercase tracking-wider text-muted"><Star className="h-3.5 w-3.5" /> Recommended for this Mac</div>
-          <div className="text-[12px] text-muted">{env.hardware.cpuBrand} · {fmtBytes(env.hardware.memoryBytes)}</div>
+          <div className="mb-2 flex items-center gap-1.5 font-display text-[11.5px] font-bold uppercase tracking-wider text-muted"><Star className="h-3.5 w-3.5" /> Recommended for this {platformName}</div>
+          <div className="text-[12px] text-muted">{[env.hardware.cpuBrand, fmtBytes(env.hardware.memoryBytes), env.hardware.unifiedMemory ? null : env.hardware.acceleratorName].filter(Boolean).join(" · ")}</div>
           <div className="mt-2 flex items-start gap-2 text-[13px]"><Mic className="mt-[3px] h-3.5 w-3.5 text-muted" /><div><div className="font-medium">{nameOf(recWhisper)}</div><div className="text-[11.5px] text-muted">{installedFlag(recWhisper) ? "Installed" : "Available in the marketplace"}</div></div></div>
           <div className="mt-2 flex items-start gap-2 text-[13px]"><Sparkles className="mt-[3px] h-3.5 w-3.5 text-muted" /><div><div className="font-medium">{nameOf(recAi)}</div><div className="text-[11.5px] text-muted">{installedFlag(recAi) ? "Installed" : "Available in the marketplace"}</div></div></div>
         </Card>
         <Card className="p-4">
           <div className="mb-2 flex items-center gap-1.5 font-display text-[11.5px] font-bold uppercase tracking-wider text-muted"><Zap className="h-3.5 w-3.5" /> Used for processing</div>
           <div className="text-[12px] text-muted">{settings["models.whisper"] || settings["models.ai"] ? "Your selection" : "Chosen automatically"}</div>
-          <div className="mt-2 flex items-start gap-2 text-[13px]"><Mic className="mt-[3px] h-3.5 w-3.5 text-muted" /><div><div className="font-medium">{usedWhisper ? modelTitle(usedWhisper) : "No Whisper model"}</div><div className="text-[11.5px] text-muted">Transcript</div></div></div>
+          <div className="mt-2 flex items-start gap-2 text-[13px]"><Mic className="mt-[3px] h-3.5 w-3.5 text-muted" /><div><div className="font-medium">{usedWhisper ? modelTitle(usedWhisper, cudaReady(env)) : "No transcription model"}</div><div className="text-[11.5px] text-muted">Transcript</div></div></div>
           <div className="mt-2 flex items-start gap-2 text-[13px]"><Sparkles className="mt-[3px] h-3.5 w-3.5 text-muted" /><div><div className="font-medium">{usedAi ? usedAi.name : "No AI model"}</div><div className="text-[11.5px] text-muted">Summary</div></div></div>
         </Card>
       </div>
       <Card className="mb-4">
-        <Row label="Compute device" info="Where transcription runs. Metal uses the GPU of Apple Silicon Macs and is several times faster than the CPU.">
+        <Row label="Compute device" info="Where transcription runs. A GPU (Metal on Apple Silicon, CUDA on NVIDIA) is several times faster than the CPU.">
           <ComputeSelect env={env} value={settings["general.computeDevice"]} onChange={(v) => update({ "general.computeDevice": v })} />
         </Row>
       </Card>
@@ -383,7 +396,7 @@ function Models({ settings, env, resolutions, update, reload, initialTab }: { se
           <Tab id="transcript" label="Transcript" tab={tab} setTab={setTab} />
           <Tab id="summaries" label="Summaries" tab={tab} setTab={setTab} />
         </div>
-        <Button size="sm" variant="ghost" loading={scanning || env.scanning} onClick={async () => { setScanning(true); try { await api.rescan(); await reload(); } finally { setScanning(false); } }}><RefreshCw className="h-3 w-3" /> Rescan</Button>
+        <Button size="sm" variant="ghost" loading={scanning || env.scanning} onClick={async () => { setScanning(true); try { await api.rescan(); await reload(); await refreshCands(); } finally { setScanning(false); } }}><RefreshCw className="h-3 w-3" /> Rescan</Button>
       </div>
 
       {tab === "transcript" && (
@@ -393,21 +406,25 @@ function Models({ settings, env, resolutions, update, reload, initialTab }: { se
               <input type="radio" name="models.whisper" checked={!settings["models.whisper"]} onChange={() => update({ "models.whisper": null })} className="accent-[rgb(var(--accent))]" />
               <div className="text-[13px]">{autoLabel(whisperAuto)}</div>
             </div>
-            {whisper.map((m) => <ModelRow key={m.id} m={m} selectedKey="models.whisper" settings={settings} update={update} onRemove={setConfirm} inUse={inUseIds.has(m.id)} />)}
-            {whisper.length === 0 && <div className="px-4 py-3 text-[12.5px] text-muted">No Whisper model installed yet.</div>}
+            {whisper.map((m) => <ModelRow key={m.id} m={m} selectedKey="models.whisper" settings={settings} update={update} onRemove={setConfirm} inUse={inUseIds.has(m.id)} gpu={cudaReady(env)} />)}
+            {whisper.length === 0 && <div className="px-4 py-3 text-[12.5px] text-muted">No transcription model installed yet.</div>}
           </Card>
           <h3 className="mb-2 mt-6 font-display text-[11.5px] font-bold uppercase tracking-wider text-muted">Model marketplace</h3>
           <Card>
-            {candsFor("transcription").map((c) => <CandidateRow key={c.id} c={c} installed={isInstalled(c)} memoryBytes={env.hardware.memoryBytes} progress={downloads.find((d) => d.id === c.id)} onStart={() => api.startDownload(c.id).then(() => api.downloads().then(setDownloads))} onCancel={() => api.cancelDownload(c.id)} />)}
+            {candsFor("transcription").map((c) => <CandidateRow key={c.id} c={c} installed={isInstalled(c)} progress={downloads.find((d) => d.id === c.id)} onStart={() => api.startDownload(c.id).then(() => api.downloads().then(setDownloads))} onCancel={() => api.cancelDownload(c.id)} />)}
           </Card>
         </>
       )}
 
       {tab === "summaries" && (
         <>
-          {ollama?.status !== "available" && (
+          {aiRes?.status === "unsupported" ? (
+            <div className="mb-3 rounded-lg border border-danger/30 bg-danger/5 px-3 py-2.5 text-[12.5px]">
+              This {platformName} cannot run a local AI model: {aiRes.reason} Transcripts still work; summaries, decisions and Ask need an AI model.
+            </div>
+          ) : ollama?.status !== "available" && (
             <div className="mb-3 rounded-lg border border-border bg-bg px-3 py-2.5 text-[12.5px] text-muted">
-              No AI runtime on this Mac yet. Huddle downloads its own (about 150 MB) together with the first model you pick below; nothing to install by hand.
+              No AI runtime on this {platformName} yet. Huddle downloads its own together with the first model you pick below; nothing to install by hand.
             </div>
           )}
           <Card>
@@ -420,7 +437,7 @@ function Models({ settings, env, resolutions, update, reload, initialTab }: { se
           </Card>
           <h3 className="mb-2 mt-6 font-display text-[11.5px] font-bold uppercase tracking-wider text-muted">Model marketplace</h3>
           <Card>
-            {candsFor("llm").map((c) => <CandidateRow key={c.id} c={c} installed={isInstalled(c)} memoryBytes={env.hardware.memoryBytes} progress={downloads.find((d) => d.id === c.id)} onStart={() => api.startDownload(c.id).then(() => api.downloads().then(setDownloads))} onCancel={() => api.cancelDownload(c.id)} />)}
+            {candsFor("llm").map((c) => <CandidateRow key={c.id} c={c} installed={isInstalled(c)} progress={downloads.find((d) => d.id === c.id)} onStart={() => api.startDownload(c.id).then(() => api.downloads().then(setDownloads))} onCancel={() => api.cancelDownload(c.id)} />)}
           </Card>
         </>
       )}
@@ -490,7 +507,7 @@ function Privacy({ settings, update }: { settings: UserSettings; update: Update 
       <DangerDialog open={!!confirm} onClose={() => setConfirm(null)} title={confirm === "meetings" ? "Delete all meeting data?" : "Delete voice profiles?"}
         confirmLabel={confirm === "meetings" ? "Delete everything" : "Delete profiles"}
         onConfirm={async () => { if (confirm === "meetings") await api.deleteAllMeetings(); else await api.deleteSpeakerEmbeddings(); setConfirm(null); }}>
-        {confirm === "meetings" ? "This permanently removes all meetings, recordings, transcripts, summaries and action items from this Mac. There is no undo." : "All stored voice embeddings will be removed permanently. Huddle will no longer recognise known voices until you name them again."}
+        {confirm === "meetings" ? `This permanently removes all meetings, recordings, transcripts, summaries and action items from this ${platformName}. There is no undo.` : "All stored voice embeddings will be removed permanently. Huddle will no longer recognise known voices until you name them again."}
       </DangerDialog>
     </>
   );
@@ -514,6 +531,7 @@ function UpdateRow() {
 // ---- Advanced -------------------------------------------------------------------------------------
 
 function Advanced({ settings, env, engine, update, resolutions }: { settings: UserSettings; env: Environment; engine: EngineStatus; update: Update; resolutions: Resolution[] }) {
+  const { go } = useNav();
   const [storage, setStorage] = useState<StorageInfo | null>(null);
   const [move, setMove] = useState<{ kind: "models" | "logs"; path: string } | null>(null);
   const dev = settings["developer.mode"];
@@ -538,6 +556,9 @@ function Advanced({ settings, env, engine, update, resolutions }: { settings: Us
         </Row>
         <Row label="Logs folder" hint={storage?.logsDir ?? ""}>
           <Button size="sm" onClick={() => pick("logs")}><FolderOpen className="h-3.5 w-3.5" /> Change…</Button>
+        </Row>
+        <Row label="Set-up assistant" hint="The first-run steps again: transcription, speaker detection and AI notes.">
+          <Button size="sm" onClick={() => go({ kind: "onboarding" })}>Run again</Button>
         </Row>
         <Row label="Developer mode">
           <Switch checked={dev} onChange={(v) => update({ "developer.mode": v })} />

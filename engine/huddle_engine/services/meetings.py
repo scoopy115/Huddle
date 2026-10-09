@@ -39,7 +39,9 @@ def _ts(value: str | float) -> float:
 
 
 def default_title(started_at: float) -> str:
-    return "Meeting " + datetime.fromtimestamp(started_at).strftime("%-d %b %Y, %H:%M")
+    # No "%-d": that strftime flag is glibc-only and raises on Windows.
+    dt = datetime.fromtimestamp(started_at)
+    return f"Meeting {dt.day} {dt:%b %Y, %H:%M}"
 
 
 _DEFAULT_TITLE = re.compile(r"^(Meeting \d{1,2} \w{3} \d{4}, \d{2}:\d{2}|Recovered recording|Untitled meeting)$")

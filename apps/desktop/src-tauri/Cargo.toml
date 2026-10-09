@@ -15,6 +15,8 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+# `macos-private-api` (transparent popover window) must stay here: tauri-build requires the
+# feature set to match `app.macOSPrivateApi` in the merged config on every platform.
 tauri = { version = "2", features = ["protocol-asset", "tray-icon", "image-png", "macos-private-api"] }
 tauri-plugin-log = "2"
 tauri-plugin-dialog = "2"
@@ -26,7 +28,6 @@ log = "0.4"
 anyhow = "1"
 thiserror = "2"
 cpal = "0.15"
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "process", "sync", "net", "io-util"] }
 uuid = { version = "1", features = ["v4"] }
 chrono = { version = "0.4", features = ["serde"] }
@@ -34,6 +35,15 @@ rand = "0.8"
 sysinfo = "0.33"
 semver = "1"
 tauri-plugin-positioner = { version = "2", features = ["tray-icon"] }
+
+# TLS: rustls (pure Rust, no system dependency) on macOS/Linux; Windows uses the system
+# certificate store through schannel, which also keeps `ring`'s C build out of the Windows target.
+[target.'cfg(not(windows))'.dependencies]
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+
+[target.'cfg(windows)'.dependencies]
+reqwest = { version = "0.12", default-features = false, features = ["json", "native-tls"] }
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Media_Audio", "Win32_Globalization"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"

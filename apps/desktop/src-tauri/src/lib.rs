@@ -19,12 +19,14 @@ mod system_audio;
 mod tray;
 mod updates;
 
+#[cfg(target_os = "macos")]
 use tauri::menu::{AboutMetadata, MenuBuilder, MenuItemBuilder, SubmenuBuilder};
 use tauri::{Emitter, Manager};
 use tauri_plugin_global_shortcut::{Builder as ShortcutBuilder, ShortcutState};
 
 /// The application menu. Its accelerators are the app's keyboard shortcuts: macOS routes
 /// them to menu events before the webview sees the key, so the UI only listens for `menu`.
+#[cfg(target_os = "macos")]
 fn build_menu(app: &tauri::App) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
     let about = AboutMetadata { name: Some("Huddle".into()), comments: Some("Private meeting notes, processed on this Mac.".into()), ..Default::default() };
     let app_menu = SubmenuBuilder::new(app, "Huddle")
@@ -72,10 +74,11 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_positioner::init())
-        // ⌥⌘R anywhere on the Mac: start a recording, or stop the running one and open Huddle.
+        // ⌥⌘R anywhere on the Mac (Ctrl+Alt+R on Windows; Win+Alt+R belongs to the Xbox Game Bar):
+        // start a recording, or stop the running one and open Huddle.
         .plugin(
             ShortcutBuilder::new()
-                .with_shortcuts(["alt+super+r"])
+                .with_shortcuts([if cfg!(target_os = "macos") { "alt+super+r" } else { "ctrl+alt+r" }])
                 .expect("valid shortcut")
                 .with_handler(|app, _shortcut, event| {
                     if event.state() == ShortcutState::Pressed {
@@ -91,8 +94,19 @@ pub fn run() {
             let data_dir = paths::data_dir(app.handle())?;
             std::fs::create_dir_all(data_dir.join("recordings"))?;
             log::info!("data dir: {}", data_dir.display());
-            let menu = build_menu(app)?;
-            app.set_menu(menu)?;
+            // The menu is the keyboard-shortcut mechanism on macOS. Windows would draw it as a
+            // classic menu bar above the window; there the UI handles the same shortcuts itself.
+            #[cfg(target_os = "macos")]
+            {
+                let menu = build_menu(app)?;
+                app.set_menu(menu)?;
+            }
+            // Windows: no native title bar; the UI draws the window controls (WindowControls.tsx)
+            // and marks its own drag regions. Resizing and the shadow stay with the system.
+            #[cfg(target_os = "windows")]
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.set_decorations(false);
+            }
             engine::spawn_on_startup(app.handle().clone(), data_dir);
             if shell_prefs::load(app.handle()).menu_bar {
                 tray::ensure(app.handle());

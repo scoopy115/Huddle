@@ -12,6 +12,7 @@ import logging
 import os
 import shutil
 import subprocess
+import sys
 import tarfile
 import threading
 import time
@@ -27,8 +28,21 @@ log = logging.getLogger(__name__)
 SYSTEM_URL = os.getenv("HUDDLE_OLLAMA_URL", "").rstrip("/") or "http://127.0.0.1:11434"
 MANAGED_HOST = "127.0.0.1:11435"
 MANAGED_URL = f"http://{MANAGED_HOST}"
-ARCHIVE_URL = "https://github.com/ollama/ollama/releases/latest/download/ollama-darwin.tgz"
-ARCHIVE_SIZE = 160_000_000   # ~152 MB; the real size comes from the download headers
+_RELEASES = "https://github.com/ollama/ollama/releases/latest/download"
+if sys.platform == "darwin":
+    ARCHIVE_URL = f"{_RELEASES}/ollama-darwin.tgz"
+    ARCHIVE_SIZE = 160_000_000      # ~152 MB; the real size comes from the download headers
+elif os.name == "nt":
+    # The standalone CLI (ollama.exe + the NVIDIA/AMD runner libraries), not the installer:
+    # no tray app, no autostart, nothing registered on the user's PC.
+    ARCHIVE_URL = f"{_RELEASES}/ollama-windows-amd64.zip"
+    ARCHIVE_SIZE = 1_100_000_000
+else:
+    ARCHIVE_URL = f"{_RELEASES}/ollama-linux-amd64.tgz"
+    ARCHIVE_SIZE = 1_000_000_000
+EXE = "ollama.exe" if os.name == "nt" else "ollama"
+# No console window behind the app on Windows.
+_NO_WINDOW = {"creationflags": 0x08000000} if os.name == "nt" else {}
 
 _models_dir: Path | None = None
 _proc: subprocess.Popen | None = None
@@ -45,12 +59,19 @@ def runtime_dir() -> Path:
 
 
 def managed_binary() -> Path:
-    return runtime_dir() / "bin" / "ollama"
+    return runtime_dir() / "bin" / EXE
 
 
 def system_binary() -> Path | None:
-    for c in (shutil.which("ollama"), "/Applications/Ollama.app/Contents/Resources/ollama",
-              "/opt/homebrew/bin/ollama", "/usr/local/bin/ollama"):
+    candidates: list[str | None] = [shutil.which("ollama")]
+    if os.name == "nt":
+        local = os.getenv("LOCALAPPDATA")
+        if local:
+            candidates.append(str(Path(local) / "Programs" / "Ollama" / "ollama.exe"))
+    else:
+        candidates += ["/Applications/Ollama.app/Contents/Resources/ollama", "/opt/homebrew/bin/ollama",
+                       "/usr/local/bin/ollama", "/usr/bin/ollama"]
+    for c in candidates:
         if c and Path(c).exists():
             return Path(c)
     return None
@@ -92,7 +113,8 @@ def ensure_started(timeout: float = 25.0) -> bool:
         runtime_dir().mkdir(parents=True, exist_ok=True)
         logf = open(runtime_dir() / "ollama.log", "ab")  # noqa: SIM115 — handed to the child
         try:
-            _proc = subprocess.Popen([str(b), "serve"], env=env, stdin=subprocess.DEVNULL, stdout=logf, stderr=subprocess.STDOUT)
+            _proc = subprocess.Popen([str(b), "serve"], env=env, stdin=subprocess.DEVNULL, stdout=logf, stderr=subprocess.STDOUT,
+                                     **_NO_WINDOW)
         except OSError as e:
             log.error("could not start ollama from %s: %s", b, e)
             return False
@@ -122,10 +144,10 @@ def stop() -> None:
 
 
 def install(progress: Callable[[int, int | None], None] | None = None, cancelled: Callable[[], bool] | None = None) -> Path:
-    """Download and unpack the official macOS build into `<models>/ollama/bin` (once)."""
+    """Download and unpack the official build for this OS into `<models>/ollama/bin` (once)."""
     dest = runtime_dir() / "bin"
     dest.mkdir(parents=True, exist_ok=True)
-    archive = runtime_dir() / "ollama-darwin.tgz"
+    archive = runtime_dir() / ARCHIVE_URL.rsplit("/", 1)[-1]
     received = 0
     with httpx.stream("GET", ARCHIVE_URL, follow_redirects=True, timeout=httpx.Timeout(30, read=120)) as r, open(archive, "wb") as f:
         r.raise_for_status()
@@ -137,15 +159,27 @@ def install(progress: Callable[[int, int | None], None] | None = None, cancelled
             received += len(chunk)
             if progress:
                 progress(received, total)
-    with tarfile.open(archive) as tar:
-        try:
-            tar.extractall(dest, filter="data")
-        except TypeError:  # Python < 3.11.4
-            tar.extractall(dest)
+    if archive.suffix == ".zip":
+        import zipfile
+        with zipfile.ZipFile(archive) as z:
+            z.extractall(dest)
+    else:
+        with tarfile.open(archive) as tar:
+            try:
+                tar.extractall(dest, filter="data")
+            except TypeError:  # Python < 3.11.4
+                tar.extractall(dest)
     archive.unlink(missing_ok=True)
     exe = managed_binary()
     if not exe.exists():
-        raise RuntimeError("The Ollama archive did not contain the ollama executable.")
-    exe.chmod(0o755)
+        # The Linux archive nests the binary under bin/.
+        nested = dest / "bin" / EXE
+        if nested.exists():
+            shutil.move(str(nested), str(managed_binary()))
+            exe = managed_binary()
+        else:
+            raise RuntimeError("The Ollama archive did not contain the ollama executable.")
+    if os.name != "nt":
+        exe.chmod(0o755)
     log.info("installed Ollama runtime at %s", exe)
     return exe

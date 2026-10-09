@@ -7,7 +7,15 @@ export function cn(...inputs: ClassValue[]) {
 
 /** macOS uses ⌘ for app shortcuts; Windows/Linux builds use Ctrl. */
 export const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
+export const isWindows = typeof navigator !== "undefined" && /Win/.test(navigator.platform);
 export const modKey = isMac ? "⌘" : "Ctrl+";
+/** "this Mac" / "this computer" in copy. */
+export const platformName = isMac ? "Mac" : "computer";
+/** The global record shortcut the shell registers. */
+export const recordShortcut = isMac ? "⌥⌘R" : "Ctrl+Alt+R";
+/** Where the small recorder lives when the window is closed. */
+export const trayName = isMac ? "menu bar" : "system tray";
+export const fileManager = isMac ? "Finder" : isWindows ? "Explorer" : "file manager";
 /** Subtle, accessible speaker differentiation — 8 hues, low saturation. `solid` is for avatars with white initials. */
 export const SPEAKER_COLORS = [
   { dot: "bg-sky-500/80", solid: "bg-sky-500", text: "text-sky-700 dark:text-sky-300", bg: "bg-sky-500/10" },

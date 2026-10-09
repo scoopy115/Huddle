@@ -25,7 +25,8 @@ log = logging.getLogger(__name__)
 def _transcription_runtimes() -> set[str]:
     from ..providers.parakeet import parakeet_available
     from ..providers.transcription import mlx_available
-    return ({RUNTIME_FASTER_WHISPER} | ({RUNTIME_MLX} if mlx_available() else set())
+    # sherpa-onnx is always in the engine (speaker separation); it also runs the ONNX Parakeet.
+    return ({RUNTIME_FASTER_WHISPER, RUNTIME_SHERPA} | ({RUNTIME_MLX} if mlx_available() else set())
             | ({RUNTIME_PARAKEET_MLX} if parakeet_available() else set()))
 
 

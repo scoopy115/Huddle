@@ -17,9 +17,15 @@ pub fn reveal_in_finder(path: String) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     let status = std::process::Command::new("open").arg(if p.is_dir() { "" } else { "-R" }).arg(&path).status();
     #[cfg(target_os = "windows")]
-    let status = std::process::Command::new("explorer").arg(&path).status();
+    {
+        // Explorer returns 1 even when it opened the window, so only a failed spawn is an error.
+        let mut cmd = std::process::Command::new("explorer");
+        if p.is_dir() { cmd.arg(&path); } else { cmd.arg(format!("/select,{path}")); }
+        return cmd.spawn().map(|_| ()).map_err(|e| e.to_string());
+    }
     #[cfg(all(unix, not(target_os = "macos")))]
-    let status = std::process::Command::new("xdg-open").arg(&path).status();
+    let status = std::process::Command::new("xdg-open").arg(if p.is_dir() { p } else { p.parent().unwrap_or(p) }).status();
+    #[cfg(not(target_os = "windows"))]
     match status {
         Ok(s) if s.success() => Ok(()),
         Ok(s) => Err(format!("Finder returned {s}")),

@@ -77,6 +77,31 @@ pub fn play(app: &AppHandle, chime: Chime) {
         return;
     }
     if let Some(path) = file(app, &chime) {
-        let _ = std::process::Command::new("afplay").arg(path).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn();
+        play_file(path);
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn play_file(path: PathBuf) {
+    let _ = std::process::Command::new("afplay").arg(path).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn();
+}
+
+#[cfg(target_os = "windows")]
+fn play_file(path: PathBuf) {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Media::Audio::{PlaySoundW, SND_ASYNC, SND_FILENAME, SND_NODEFAULT};
+    let wide: Vec<u16> = path.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
+    // SAFETY: `wide` is a NUL-terminated UTF-16 path; PlaySoundW with SND_ASYNC copies what it needs.
+    unsafe {
+        PlaySoundW(wide.as_ptr(), std::ptr::null_mut(), SND_FILENAME | SND_ASYNC | SND_NODEFAULT);
+    }
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn play_file(path: PathBuf) {
+    for player in ["paplay", "aplay"] {
+        if std::process::Command::new(player).arg(&path).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn().is_ok() {
+            return;
+        }
     }
 }

@@ -113,5 +113,12 @@ pub fn open_firewall_settings() -> Result<(), String> {
             .status()
             .map_err(|e| e.to_string())?;
     }
+    #[cfg(target_os = "windows")]
+    {
+        // Windows Defender Firewall → "Allow an app through the firewall".
+        let mut cmd = std::process::Command::new("control");
+        crate::engine::quiet(&mut cmd);
+        cmd.arg("firewall.cpl").spawn().map_err(|e| e.to_string())?;
+    }
     Ok(())
 }
