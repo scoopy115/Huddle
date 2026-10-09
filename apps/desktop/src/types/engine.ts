@@ -3,6 +3,8 @@
 export type MeetingStatus = "recording" | "saved" | "processing" | "ready" | "failed";
 export type StageName =
   | "preprocessing"
+  | "uploading"
+  | "remote_processing"
   | "transcribing"
   | "diarizing"
   | "identifying_speakers"
@@ -12,6 +14,8 @@ export type StageName =
   | "indexing";
 export const STAGES: StageName[] = [
   "preprocessing",
+  "uploading",
+  "remote_processing",
   "transcribing",
   "diarizing",
   "identifying_speakers",
@@ -23,6 +27,8 @@ export const STAGES: StageName[] = [
 
 /** Notes style: "meeting" = summary, topics, decisions; "interview" = summary + every question with its answer. */
 export type MeetingMode = "meeting" | "interview";
+/** Where a recording is processed: on this Mac or on a Huddle Server the user runs. */
+export type ProcessingTarget = "local" | "remote";
 
 export interface Meeting {
   id: string;
@@ -36,6 +42,8 @@ export interface Meeting {
   speakerCountHint: number | null;
   contextHtml: string | null;
   mode: MeetingMode;
+  processingTarget: ProcessingTarget;
+  remoteId: string | null;
   status: MeetingStatus;
   source: string;
   notes: string | null;
@@ -417,6 +425,11 @@ export type UserSettings = Record<string, unknown> & {
   "mcp.enabled": boolean;
   "mcp.networkEnabled": boolean;
   "mcp.port": number;
+  "server.url": string;
+  "server.apiKey": string;
+  "server.caFingerprint": string;
+  "server.name": string;
+  "server.defaultTarget": "ask" | "local" | "remote";
   "developer.mode": boolean;
   "onboarding.completed": boolean;
 };
@@ -434,4 +447,34 @@ export interface ProcessesInfo {
   jobs: { meetingId: string; title: string; state: "queued" | "running"; stage: string | null; progress: number | null; startedAt: number | null; stages: Record<string, StageState> }[];
   live: (LiveStatus & { recordingId: string })[];
   downloads: DownloadProgress[];
+}
+
+// ---- Huddle Server ------------------------------------------------------------
+export interface ServerStatus {
+  configured: boolean;
+  url: string;
+  name: string;
+  trusted: boolean;
+  defaultTarget: "ask" | "local" | "remote";
+}
+
+export interface ServerCapabilities {
+  transcription: string | null;
+  diarization: boolean;
+  llm: string | null;
+}
+
+export interface ServerInfo {
+  name: string;
+  version: string;
+  engineVersion: string;
+  client: string;
+  capabilities: ServerCapabilities;
+}
+
+export interface ServerTestResult {
+  ok: boolean;
+  error: string | null;
+  server: ServerInfo | null;
+  untrustedCertificate: { fingerprint: string; subject: string } | null;
 }

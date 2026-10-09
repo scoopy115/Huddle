@@ -17,12 +17,22 @@ MeetingStatus = Literal["recording", "saved", "processing", "ready", "failed"]
 # Notes style. "meeting": summary, topics, decisions. "interview": summary + every question with its answer.
 MeetingMode = Literal["meeting", "interview"]
 MODES: tuple[str, ...] = ("meeting", "interview")
-StageName = Literal["preprocessing", "transcribing", "diarizing", "identifying_speakers",
-                    "summarizing", "indexing"]
-STAGES: list[str] = ["preprocessing", "transcribing", "diarizing", "identifying_speakers", "refining",
-                     "summarizing", "extracting_actions", "indexing"]
+StageName = Literal["preprocessing", "uploading", "remote_processing", "transcribing", "diarizing",
+                    "identifying_speakers", "summarizing", "indexing"]
+STAGES: list[str] = ["preprocessing", "uploading", "remote_processing", "transcribing", "diarizing",
+                     "identifying_speakers", "refining", "summarizing", "extracting_actions", "indexing"]
 # Stages that run for every new recording; the others are started on demand from the UI.
 DEFAULT_PIPELINE: list[str] = ["preprocessing", "transcribing", "diarizing", "identifying_speakers", "summarizing", "indexing"]
+# Processing on a Huddle Server: the audio is prepared here, sent over, and the results come back.
+# Known-voice recognition runs locally (the voices live on this machine); notes are written by the
+# server when it has an AI model, otherwise here.
+REMOTE_PIPELINE: list[str] = ["preprocessing", "uploading", "remote_processing", "identifying_speakers", "summarizing", "indexing"]
+ProcessingTarget = Literal["local", "remote"]
+TARGETS: tuple[str, ...] = ("local", "remote")
+
+
+def pipeline_for(target: str | None) -> list[str]:
+    return list(REMOTE_PIPELINE if target == "remote" else DEFAULT_PIPELINE)
 
 
 # ---- meetings ------------------------------------------------------------- #
@@ -175,6 +185,10 @@ class Meeting(Schema):
     speaker_count_hint: int | None = None
     context_html: str | None = None         # user feedback/context for the notes (rich text)
     mode: MeetingMode = "meeting"
+    processing_target: ProcessingTarget = "local"
+    remote_id: str | None = None            # id of the copy on the Huddle Server
+    notes_language: str | None = None       # per-meeting override of the notes language (server uploads)
+    owner: str = ""                         # Huddle Server account; "" on the desktop
     status: MeetingStatus
     source: str
     notes: str | None = None
@@ -201,6 +215,7 @@ class Meeting(Schema):
 class Project(Schema):
     id: str
     name: str
+    owner: str = ""
     description: str | None = None
     color_index: int = 0
     created_at: float
@@ -221,6 +236,7 @@ class CreateProjectRequest(Schema):
     name: str
     description: str | None = None
     meeting_ids: list[str] = Field(default_factory=list)
+    owner: str = ""
 
 
 class UpdateProjectRequest(Schema):
@@ -256,6 +272,9 @@ class CreateFromRecordingRequest(Schema):
     language: str | None = None             # spoken language chosen when the recording started
     speaker_count: int | None = None        # "N people spoke" hint for speaker separation
     mode: MeetingMode = "meeting"
+    processing_target: ProcessingTarget = "local"
+    notes_language: str | None = None
+    owner: str = ""
     source: str = "recorded"
     process: bool = True
 
@@ -455,3 +474,23 @@ class Environment(Schema):
     models: list[LocalModel]
     last_scan_at: float | None = None
     scanning: bool = False
+
+
+# ---- Huddle Server (self-hosted processing) ------------------------------- #
+class ServerStatus(Schema):
+    configured: bool
+    url: str = ""
+    name: str = ""
+    trusted: bool = False                   # a self-signed certificate was pinned
+    default_target: str = "ask"
+
+
+class ServerTestResult(Schema):
+    ok: bool
+    error: str | None = None
+    server: dict[str, Any] | None = None    # /v1/ping payload: name, version, capabilities
+    untrusted_certificate: dict[str, Any] | None = None   # {fingerprint, subject} when the TLS cert is unknown
+
+
+class ServerTrustRequest(Schema):
+    fingerprint: str

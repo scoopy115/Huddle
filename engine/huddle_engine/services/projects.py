@@ -37,7 +37,8 @@ MAX_CANDIDATES = 6             # how many projects the model gets to choose from
 
 def _row(r) -> Project:
     keys = r.keys()
-    return Project(id=r["id"], name=r["name"], description=r["description"], color_index=r["color_index"],
+    return Project(id=r["id"], name=r["name"], owner=(r["owner"] or "") if "owner" in keys else "",
+                   description=r["description"], color_index=r["color_index"],
                    created_at=r["created_at"], updated_at=r["updated_at"],
                    meeting_count=r["meeting_count"] if "meeting_count" in keys else 0,
                    open_action_count=r["open_action_count"] if "open_action_count" in keys else 0,
@@ -56,8 +57,11 @@ _LIST_SQL = """
 """
 
 
-def list_projects(db: Database) -> list[Project]:
-    return [_row(r) for r in db.query(_LIST_SQL + " ORDER BY last_meeting_at DESC NULLS LAST, LOWER(p.name)")]
+def list_projects(db: Database, owner: str | None = None) -> list[Project]:
+    """All projects, or those of one owner ('' = the desktop's single user)."""
+    if owner is None:
+        return [_row(r) for r in db.query(_LIST_SQL + " ORDER BY last_meeting_at DESC NULLS LAST, LOWER(p.name)")]
+    return [_row(r) for r in db.query(_LIST_SQL + " WHERE p.owner = ? ORDER BY last_meeting_at DESC NULLS LAST, LOWER(p.name)", (owner,))]
 
 
 def get_project(db: Database, project_id: str) -> Project | None:
@@ -65,8 +69,8 @@ def get_project(db: Database, project_id: str) -> Project | None:
     return _row(r) if r else None
 
 
-def find_by_name(db: Database, name: str) -> Project | None:
-    r = db.one(_LIST_SQL + " WHERE LOWER(p.name) = LOWER(?)", (name.strip(),))
+def find_by_name(db: Database, name: str, owner: str = "") -> Project | None:
+    r = db.one(_LIST_SQL + " WHERE p.owner = ? AND LOWER(p.name) = LOWER(?)", (owner, name.strip()))
     return _row(r) if r else None
 
 
@@ -74,14 +78,14 @@ def create(db: Database, req: CreateProjectRequest) -> Project:
     name = req.name.strip()
     if not name:
         raise ValueError("A project needs a name.")
-    if find_by_name(db, name):
+    if find_by_name(db, name, req.owner or ""):
         raise ValueError(f"There is already a project called “{name}”.")
     pid = uuid.uuid4().hex[:12]
     now = time.time()
-    n = db.one("SELECT COUNT(*) AS n FROM projects")["n"]
+    n = db.one("SELECT COUNT(*) AS n FROM projects WHERE owner = ?", (req.owner or "",))["n"]
     with db.tx() as c:
-        c.execute("INSERT INTO projects(id, name, description, color_index, created_at, updated_at) VALUES (?,?,?,?,?,?)",
-                  (pid, name, (req.description or "").strip() or None, n % 8, now, now))
+        c.execute("INSERT INTO projects(id, name, description, color_index, created_at, updated_at, owner) VALUES (?,?,?,?,?,?,?)",
+                  (pid, name, (req.description or "").strip() or None, n % 8, now, now, req.owner or ""))
         for mid in req.meeting_ids:
             c.execute("UPDATE meetings SET project_id = ?, suggested_project_id = NULL, suggested_project_confidence = NULL,"
                       " suggested_project_reason = NULL WHERE id = ?", (pid, mid))
@@ -94,7 +98,8 @@ def update(db: Database, project_id: str, name: str | None = None, description: 
         name = name.strip()
         if not name:
             raise ValueError("A project needs a name.")
-        other = find_by_name(db, name)
+        cur = get_project(db, project_id)
+        other = find_by_name(db, name, cur.owner if cur else "")
         if other and other.id != project_id:
             raise ValueError(f"There is already a project called “{name}”.")
         sets.append("name = ?")
@@ -247,10 +252,10 @@ def _llm_pick(provider, db: Database, meeting_id: str, candidates: list[tuple[Pr
 def suggest(db: Database, meeting_id: str, provider=None, language: str = "English") -> Project | None:
     """Work out which project the meeting probably belongs to and store it as a suggestion.
     Skips meetings that already have a project. Returns the suggested project, if any."""
-    m = db.one("SELECT project_id FROM meetings WHERE id = ?", (meeting_id,))
+    m = db.one("SELECT project_id, owner FROM meetings WHERE id = ?", (meeting_id,))
     if not m or m["project_id"]:
         return None
-    projects = list_projects(db)
+    projects = list_projects(db, owner=m["owner"] or "")
     if not projects:
         dismiss_suggestion(db, meeting_id)
         return None

@@ -40,6 +40,9 @@ from .schemas import (
     MoveDirRequest,
     RefineRequest,
     RenameSpeakerRequest,
+    ServerStatus,
+    ServerTestResult,
+    ServerTrustRequest,
     SetupPlan,
     StorageInfo,
     UpdateActionItemRequest,
@@ -215,6 +218,70 @@ def put_settings(patch: dict):
     if any(k.startswith("mcp.") for k in patch):
         _sync_mcp_network()
     return s
+
+
+# ---- Huddle Server ------------------------------------------------------------- #
+def _server_status() -> ServerStatus:
+    from . import server_client
+    c = ctx()
+    s = c.settings()
+    url = server_client.normalize_url(str(s.get("server.url") or ""))
+    return ServerStatus(configured=bool(url and s.get("server.apiKey")), url=url, name=str(s.get("server.name") or ""),
+                        trusted=bool(url) and server_client.ca_file(c.cfg, url).exists(),
+                        default_target=str(s.get("server.defaultTarget") or "ask"))
+
+
+@app.get("/server/status")
+def server_status():
+    return _server_status()
+
+
+@app.post("/server/test")
+def server_test():
+    """Reach the configured server with the stored key. An unknown self-signed certificate is
+    reported with its fingerprint so the user can confirm it (POST /server/trust)."""
+    from . import server_client
+    c = ctx()
+    sc = server_client.config_from_settings(c.cfg, c.settings())
+    if not sc:
+        return ServerTestResult(ok=False, error="Enter the server address and the client key first.")
+    try:
+        info = server_client.ping(sc)
+    except server_client.UntrustedCertificate as e:
+        return ServerTestResult(ok=False, error=str(e), untrusted_certificate={"fingerprint": e.fingerprint, "subject": e.subject})
+    except server_client.ServerError as e:
+        return ServerTestResult(ok=False, error=str(e) + (f" ({e.detail[:200]})" if e.detail else ""))
+    c.update_settings({"server.name": str(info.get("name") or sc.host)})
+    return ServerTestResult(ok=True, server=info)
+
+
+@app.post("/server/trust")
+def server_trust(req: ServerTrustRequest):
+    from . import server_client
+    c = ctx()
+    s = c.settings()
+    url = server_client.normalize_url(str(s.get("server.url") or ""))
+    if not url:
+        raise HTTPException(400, "No server address set")
+    try:
+        fp = server_client.trust(c.cfg, url, req.fingerprint)
+    except server_client.ServerError as e:
+        raise HTTPException(400, str(e))
+    c.update_settings({"server.caFingerprint": fp})
+    return _server_status()
+
+
+@app.post("/server/forget")
+def server_forget():
+    """Remove the server: address, key and pinned certificate."""
+    from . import server_client
+    c = ctx()
+    url = server_client.normalize_url(str(c.settings().get("server.url") or ""))
+    if url:
+        server_client.ca_file(c.cfg, url).unlink(missing_ok=True)
+    c.update_settings({"server.url": "", "server.apiKey": "", "server.caFingerprint": "", "server.name": "",
+                       "server.defaultTarget": "ask"})
+    return _server_status()
 
 
 # ---- models -------------------------------------------------------------------- #
@@ -398,7 +465,8 @@ def delete_audio(meeting_id: str):
 
 @app.post("/meetings/{meeting_id}/process")
 def process(meeting_id: str, body: dict | None = None):
-    """Reprocess. Optional body: {"languageOverride": "nl" | "" (auto), "speakerCount": 2 | 0 (auto), "mode": "meeting" | "interview"}.
+    """Reprocess. Optional body: {"languageOverride": "nl" | "" (auto), "speakerCount": 2 | 0 (auto), "mode": "meeting" | "interview",
+    "target": "local" | "remote"}.
     The previous transcript and notes stay until each stage finishes, so cancelling keeps the old version."""
     c = ctx()
     if not ms.get_meeting(c.db, meeting_id):
@@ -410,6 +478,11 @@ def process(meeting_id: str, body: dict | None = None):
     if body and body.get("mode"):
         try:
             ms.update_meeting(c.db, meeting_id, mode=str(body["mode"]))
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+    if body and body.get("target"):
+        try:
+            ms.update_meeting(c.db, meeting_id, processing_target=str(body["target"]))
         except ValueError as e:
             raise HTTPException(400, str(e))
     c.jobs.enqueue(meeting_id)

@@ -8,6 +8,8 @@ import { Button } from "./ui";
 
 const LABELS: Record<StageName, { doing: string; done: string; retry: string }> = {
   preprocessing: { doing: "Preparing audio", done: "Audio prepared", retry: "Retry from the start" },
+  uploading: { doing: "Sending to the server", done: "Sent to the server", retry: "Retry upload" },
+  remote_processing: { doing: "Processing on the server", done: "Processed on the server", retry: "Retry" },
   transcribing: { doing: "Transcribing", done: "Transcript generated", retry: "Retry transcription" },
   diarizing: { doing: "Detecting speakers", done: "Speakers detected", retry: "Retry speaker detection" },
   identifying_speakers: { doing: "Recognising known voices", done: "Known voices checked", retry: "Retry recognition" },
@@ -53,6 +55,7 @@ export function ProcessingStatus({ job, onRetry, onCancel }: { job: ProcessingJo
                 </span>
                 {pct != null && <span className="font-mono text-[11.5px] tabular-nums text-accent">{pct}%</span>}
                 {eta && <span className="text-[11.5px] text-muted">{eta}</span>}
+                {st === "running" && job.stages[s]?.detail && <span className="truncate text-[11px] text-muted">{job.stages[s]!.detail}</span>}
                 {st === "done" && job.stages[s]?.detail && (
                   // meetings processed before the detail was trimmed still carry "· 19 turns …"
                   <span className="truncate text-[11px] text-muted">{s === "diarizing" ? job.stages[s]!.detail!.split(" · ")[0] : job.stages[s]!.detail}</span>

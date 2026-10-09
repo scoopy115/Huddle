@@ -15,7 +15,7 @@ from ..providers import ollama_runtime
 from ..schemas import LocalModel, ProviderStatus
 from .common import RUNTIME_OLLAMA, is_embedding_model, llm_family_from_name
 
-OLLAMA_URL = "http://127.0.0.1:11434"
+OLLAMA_URL = os.getenv("HUDDLE_OLLAMA_URL", "").rstrip("/") or "http://127.0.0.1:11434"
 
 
 def _models_dir() -> Path:

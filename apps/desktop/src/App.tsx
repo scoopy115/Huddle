@@ -23,7 +23,7 @@ import { MeetingsScreen } from "@/screens/MeetingsScreen";
 import { ProjectScreen } from "@/screens/ProjectScreen";
 import { ProjectsScreen } from "@/screens/ProjectsScreen";
 import { OnboardingScreen } from "@/screens/OnboardingScreen";
-import { RecordScreen } from "@/screens/RecordScreen";
+import { RecordScreen, processingChoice } from "@/screens/RecordScreen";
 import { SearchScreen } from "@/screens/SearchScreen";
 import { SettingsScreen } from "@/screens/SettingsScreen";
 
@@ -130,18 +130,21 @@ export default function App() {
   // Recordings started from the menu bar or ⌥⌘R: the shell records, the UI turns the result into
   // a meeting once the engine is up. `recording:stopped` wakes a visible window; the pending
   // queue covers the case where the window was hidden or the engine was stopped meanwhile.
+  // Recordings nobody is watching (menu bar, recovery) follow the Server setting; "ask" means this Mac.
+  const defaultTarget = () => { const c = settings ? processingChoice(settings) : "local"; return c === "ask" ? "local" : c; };
   const submitPending = useCallback(async () => {
     if (engine.state !== "ready") return;
     const list = await native.takePendingRecordings().catch(() => [] as RecordingMeta[]);
     for (const r of list) {
       if (r.status !== "saved" || r.durationSec < 1) { if (r.error) setToast(r.error); continue; }
       try {
-        const meeting = await api.createFromRecording({ id: r.id, filePath: r.filePath, systemFilePath: r.systemFilePath ?? null, startedAt: r.startedAt, durationSec: r.durationSec, inputDevice: r.inputDevice, sampleRate: r.sampleRate, channels: r.channels, format: r.format, source: "recorded", process: true });
+        const meeting = await api.createFromRecording({ id: r.id, filePath: r.filePath, systemFilePath: r.systemFilePath ?? null, startedAt: r.startedAt, durationSec: r.durationSec, inputDevice: r.inputDevice, sampleRate: r.sampleRate, channels: r.channels, format: r.format, source: "recorded", process: true, processingTarget: defaultTarget() });
         await refreshMeetings();
         go({ kind: "meeting", id: meeting.id });
       } catch (e) { setToast(errorMessage(e)); }
     }
-  }, [engine.state, go, refreshMeetings]);
+    // oxlint-disable-next-line react-hooks/exhaustive-deps
+  }, [engine.state, go, refreshMeetings, settings]);
   useEffect(() => { submitPending(); }, [submitPending]);
   useEffect(() => {
     const uns: (() => void)[] = [];
@@ -254,7 +257,7 @@ export default function App() {
     const done: string[] = [];
     for (const r of list) {
       try {
-        await api.createFromRecording({ id: r.id, filePath: r.filePath, systemFilePath: r.systemFilePath ?? null, startedAt: r.startedAt, durationSec: r.durationSec, inputDevice: r.inputDevice, sampleRate: r.sampleRate, channels: r.channels, format: r.format, source: "recovered", title: "Recovered recording", process: true });
+        await api.createFromRecording({ id: r.id, filePath: r.filePath, systemFilePath: r.systemFilePath ?? null, startedAt: r.startedAt, durationSec: r.durationSec, inputDevice: r.inputDevice, sampleRate: r.sampleRate, channels: r.channels, format: r.format, source: "recovered", title: "Recovered recording", process: true, processingTarget: defaultTarget() });
         done.push(r.id);
       } catch (e) { setToast(errorMessage(e)); }
     }

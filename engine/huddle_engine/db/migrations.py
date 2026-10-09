@@ -308,6 +308,44 @@ MIGRATIONS.append((9, """
     DELETE FROM summaries WHERE provider = 'extractive';
     """))
 
+MIGRATIONS.append((10, """
+    -- Where a meeting is processed: on this machine or on a Huddle Server the user runs. The
+    -- server keeps its own copy of the recording under remote_id; the results are imported here.
+    ALTER TABLE meetings ADD COLUMN processing_target TEXT NOT NULL DEFAULT 'local';
+    ALTER TABLE meetings ADD COLUMN remote_id TEXT;
+    ALTER TABLE meetings ADD COLUMN remote_uploaded_at REAL;
+    """))
+
+MIGRATIONS.append((11, """
+    -- Language the notes of this meeting are written in (NULL = the app setting). Set by a client
+    -- that sends a recording to a Huddle Server, so the server writes notes in the client's language.
+    ALTER TABLE meetings ADD COLUMN notes_language TEXT;
+    """))
+
+MIGRATIONS.append((12, """
+    -- Owners (Huddle Server accounts). '' = the single user of a desktop install. Known voices and
+    -- projects are per owner, so one account's voices never name speakers in another's recordings.
+    ALTER TABLE meetings ADD COLUMN owner TEXT NOT NULL DEFAULT '';
+    ALTER TABLE projects ADD COLUMN owner TEXT NOT NULL DEFAULT '';
+    DROP INDEX IF EXISTS idx_projects_name;
+    CREATE UNIQUE INDEX idx_projects_name ON projects(owner, LOWER(name));
+    CREATE TABLE speakers_v12 (
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        name            TEXT NOT NULL,
+        embedding       TEXT,
+        n_samples       INTEGER NOT NULL DEFAULT 0,
+        created_at      REAL NOT NULL,
+        updated_at      REAL NOT NULL,
+        embedding_model TEXT,
+        owner           TEXT NOT NULL DEFAULT '',
+        UNIQUE(owner, name)
+    );
+    INSERT INTO speakers_v12(id, name, embedding, n_samples, created_at, updated_at, embedding_model)
+        SELECT id, name, embedding, n_samples, created_at, updated_at, embedding_model FROM speakers;
+    DROP TABLE speakers;
+    ALTER TABLE speakers_v12 RENAME TO speakers;
+    """))
+
 LATEST_VERSION = MIGRATIONS[-1][0]
 
 

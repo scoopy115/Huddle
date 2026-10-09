@@ -13,6 +13,9 @@ import type {
   ProcessesInfo,
   Meeting,
   MeetingMode,
+  ProcessingTarget,
+  ServerStatus,
+  ServerTestResult,
   MeetingDetail,
   MeetingSpeaker,
   ProcessingJob,
@@ -54,6 +57,7 @@ export interface RecordingSubmission {
   process?: boolean;
   speakerCount?: number | null;
   mode?: MeetingMode;
+  processingTarget?: ProcessingTarget;
 }
 
 export const api = {
@@ -68,7 +72,7 @@ export const api = {
   updateMeeting: (id: string, body: { title?: string; notes?: string; languageOverride?: string; speakerCountHint?: number; projectId?: string; mode?: MeetingMode }) => patch<Meeting>(`/meetings/${id}`, body),
   deleteMeeting: (id: string) => del<{ ok: boolean }>(`/meetings/${id}`),
   deleteAudio: (id: string) => post<{ freedBytes: number }>(`/meetings/${id}/delete-audio`),
-  process: (id: string, opts?: { languageOverride?: string; speakerCount?: number; mode?: MeetingMode }) => post<ProcessingJob>(`/meetings/${id}/process`, opts),
+  process: (id: string, opts?: { languageOverride?: string; speakerCount?: number; mode?: MeetingMode; target?: ProcessingTarget }) => post<ProcessingJob>(`/meetings/${id}/process`, opts),
   cancelProcessing: (id: string) => post<{ ok: boolean }>(`/meetings/${id}/cancel`),
   processes: () => get<ProcessesInfo>("/processes"),
   retryStage: (id: string, stage: string) => post<ProcessingJob>(`/meetings/${id}/retry/${stage}`),
@@ -127,6 +131,12 @@ export const api = {
   startDownload: (candidateId: string) => post<DownloadProgress>(`/models/downloads/${candidateId}`),
   cancelDownload: (candidateId: string) => del<{ ok: boolean }>(`/models/downloads/${candidateId}`),
   deleteModel: (modelId: string) => del<{ ok: boolean }>(`/models/${modelId}`),
+
+  // Huddle Server
+  serverStatus: () => get<ServerStatus>("/server/status"),
+  serverTest: () => post<ServerTestResult>("/server/test"),
+  serverTrust: (fingerprint: string) => post<ServerStatus>("/server/trust", { fingerprint }),
+  serverForget: () => post<ServerStatus>("/server/forget"),
 
   // mcp
   mcpStatus: () => get<McpStatus>("/mcp/status"),

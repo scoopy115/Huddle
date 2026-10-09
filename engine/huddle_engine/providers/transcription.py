@@ -301,7 +301,13 @@ def make_transcription_provider(model, vocab: list[str] | None, device: str = "a
         return ParakeetMlxProvider(ref, vocab=vocab)
     if model.format == "MLX":
         return MlxWhisperProvider(ref, vocab=vocab)
-    dev = "cpu" if device in ("auto", "cpu", "apple-gpu-metal") else device
+    if device == "auto":
+        try:
+            import ctranslate2
+            device = "cuda" if ctranslate2.get_cuda_device_count() > 0 else "cpu"
+        except Exception:
+            device = "cpu"
+    dev = {"cpu": "cpu", "apple-gpu-metal": "cpu", "nvidia-cuda": "cuda"}.get(device, device)
     return FasterWhisperProvider(model=ref, device=dev, vocab=vocab)
 
 

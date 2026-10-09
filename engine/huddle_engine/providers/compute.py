@@ -29,10 +29,22 @@ def hardware_info() -> dict:
     else:  # pragma: no cover - non-mac
         info["cpuBrand"] = platform.processor() or None
         try:
-            import psutil  # type: ignore
-            info["memoryBytes"] = psutil.virtual_memory().total
-        except Exception:
+            with open("/proc/meminfo", encoding="utf-8") as fh:
+                for line in fh:
+                    if line.startswith("MemTotal:"):
+                        info["memoryBytes"] = int(line.split()[1]) * 1024
+                        break
+        except OSError:
             pass
+        if not info["cpuBrand"]:
+            try:
+                with open("/proc/cpuinfo", encoding="utf-8") as fh:
+                    for line in fh:
+                        if line.lower().startswith(("model name", "hardware")):
+                            info["cpuBrand"] = line.split(":", 1)[1].strip()
+                            break
+            except OSError:
+                pass
     return info
 
 

@@ -7,6 +7,7 @@ output) and ``complete`` (free text). The summariser never knows which one it go
 from __future__ import annotations
 
 import json
+import os
 import traceback
 
 import httpx
@@ -14,7 +15,7 @@ import httpx
 from . import ollama_runtime
 from .base import ProviderError
 
-OLLAMA_URL = "http://127.0.0.1:11434"
+OLLAMA_URL = os.getenv("HUDDLE_OLLAMA_URL", "").rstrip("/") or "http://127.0.0.1:11434"
 LMSTUDIO_URL = "http://127.0.0.1:1234"
 
 

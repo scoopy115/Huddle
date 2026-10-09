@@ -21,12 +21,18 @@ from ..discovery.registry import Registry
 from ..providers import ollama_runtime
 from ..providers.base import ProviderError
 from ..providers.transcription import release_models
-from ..schemas import DEFAULT_PIPELINE, STAGES
+from ..schemas import DEFAULT_PIPELINE, STAGES, pipeline_for
+from ..services import meetings as ms
 from ..settings import EngineConfig
 from . import stages as st
 from .stages import JobCancelled
 
 log = logging.getLogger(__name__)
+
+# Without these there is nothing for the later stages to work on.
+ABORTING = {"preprocessing", "transcribing", "uploading", "remote_processing"}
+# Started from the UI only; never part of an automatic run.
+ON_DEMAND = {"refining", "extracting_actions"}
 
 
 class JobRunner:
@@ -55,9 +61,11 @@ class JobRunner:
         after it are simply queued again instead of being reported as failed."""
         for r in self.db.query("SELECT * FROM processing_jobs WHERE state IN ('running', 'queued')"):
             stages = json.loads(r["stages_json"])
-            todo = [n for n in STAGES if stages.get(n, {}).get("status") in ("running", "pending")]
+            pipeline = pipeline_for(ms.processing_target(self.db, r["meeting_id"]))
+            todo = [n for n in STAGES if stages.get(n, {}).get("status") in ("running", "pending")
+                    and (n in pipeline or n in ON_DEMAND)]
             if not todo:
-                todo = list(DEFAULT_PIPELINE)
+                todo = pipeline
             for n in todo:
                 stages[n] = {"status": "pending"}
             self._write(r["meeting_id"], state="queued", current_stage=None, stages=stages,
@@ -71,16 +79,21 @@ class JobRunner:
 
     # ---- public API --------------------------------------------------------- #
     def enqueue(self, meeting_id: str, stage_names: list[str] | None = None) -> None:
-        names = stage_names or list(DEFAULT_PIPELINE)
+        pipeline = pipeline_for(ms.processing_target(self.db, meeting_id))
+        names = stage_names or pipeline
         existing = self.db.one("SELECT stages_json FROM processing_jobs WHERE meeting_id = ?", (meeting_id,))
         stages = json.loads(existing["stages_json"]) if existing else {}
+        if not stage_names:
+            # a full run: stages that belong to the other processing path (local vs server) are
+            # skipped, not left pending from an earlier run
+            stages = {}
         for n in STAGES:
             if n in names:
                 stages[n] = {"status": "pending"}
             else:
                 # on-demand stages (refining, extracting_actions) are "skipped" until asked for,
                 # so recovery never starts them by itself
-                stages.setdefault(n, {"status": "pending" if n in DEFAULT_PIPELINE else "skipped"})
+                stages.setdefault(n, {"status": "pending" if n in pipeline else "skipped"})
         self._write(meeting_id, state="queued", current_stage=None, stages=stages, error=None, error_detail=None)
         self.db.execute("UPDATE meetings SET status = 'processing' WHERE id = ?", (meeting_id,))
         self._q.put((meeting_id, names))
@@ -92,7 +105,7 @@ class JobRunner:
     def retry_stage(self, meeting_id: str, stage: str) -> None:
         if stage not in STAGES:
             raise ValueError(f"Unknown stage '{stage}'")
-        self.enqueue(meeting_id, [stage] + st.DOWNSTREAM[stage])
+        self.enqueue(meeting_id, [stage, *st.downstream(stage, ms.processing_target(self.db, meeting_id))])
 
     # ---- worker ------------------------------------------------------------- #
     def _loop(self) -> None:
@@ -117,6 +130,7 @@ class JobRunner:
         self._active = meeting_id
         row = self.db.one("SELECT stages_json FROM processing_jobs WHERE meeting_id = ?", (meeting_id,))
         stages = json.loads(row["stages_json"]) if row else {n: {"status": "pending" if n in DEFAULT_PIPELINE else "skipped"} for n in STAGES}
+        stages = {n: stages.get(n, {"status": "skipped"}) for n in STAGES} | {k: v for k, v in stages.items() if k not in STAGES}
 
         def is_cancelled() -> bool:
             return meeting_id in self._cancelled or not self.db.one("SELECT 1 FROM meetings WHERE id = ?", (meeting_id,))
@@ -133,8 +147,16 @@ class JobRunner:
                 self._last_progress_write = now
                 self._write(meeting_id, state="running", current_stage=name, stages=stages)
 
+        def status(text: str) -> None:
+            name = current["name"]
+            if not name:
+                return
+            stages[name]["detail"] = text
+            self._write(meeting_id, state="running", current_stage=name, stages=stages)
+
         ctx = st.StageContext(db=self.db, cfg=self.cfg, registry=self.registry, settings=self.settings_fn(),
-                              meeting_id=meeting_id, memory_bytes=self.memory_bytes, progress=progress, cancelled=is_cancelled)
+                              meeting_id=meeting_id, memory_bytes=self.memory_bytes, progress=progress, cancelled=is_cancelled,
+                              status=status, run_stages=list(names))
         self._write(meeting_id, state="running", current_stage=None, stages=stages)
         aborted = False
         for name in STAGES:
@@ -165,14 +187,14 @@ class JobRunner:
             except ProviderError as e:
                 stages[name].update(status="failed", finished_at=time.time(), error=str(e), error_detail=e.detail)
                 log.warning("[%s] %s failed: %s", meeting_id, name, e)
-                if name in ("preprocessing", "transcribing"):
+                if name in ABORTING:
                     aborted = True
             except Exception:  # unexpected → still a clean user message + full detail
                 stages[name].update(status="failed", finished_at=time.time(),
                                     error=f"{_friendly(name)} failed unexpectedly.",
                                     error_detail=traceback.format_exc())
                 log.exception("[%s] %s crashed", meeting_id, name)
-                if name in ("preprocessing", "transcribing"):
+                if name in ABORTING:
                     aborted = True
             self._write(meeting_id, state="running", current_stage=None, stages=stages)
 
@@ -208,7 +230,8 @@ class JobRunner:
 
 
     def _set_meeting_status(self, meeting_id: str, stages: dict) -> None:
-        core_ok = stages.get("transcribing", {}).get("status") == "done"
+        core = "remote_processing" if ms.processing_target(self.db, meeting_id) == "remote" else "transcribing"
+        core_ok = stages.get(core, {}).get("status") == "done"
         status = "ready" if core_ok else "failed"
         self.db.execute("UPDATE meetings SET status = ? WHERE id = ?", (status, meeting_id))
 
@@ -224,6 +247,7 @@ class JobRunner:
 
 
 def _friendly(stage: str) -> str:
-    return {"preprocessing": "Audio preparation", "transcribing": "Transcription", "diarizing": "Speaker detection",
+    return {"preprocessing": "Audio preparation", "uploading": "Upload to the server", "remote_processing": "Processing on the server",
+            "transcribing": "Transcription", "diarizing": "Speaker detection",
             "identifying_speakers": "Speaker recognition", "summarizing": "Summary generation",
             "indexing": "Indexing"}.get(stage, stage)

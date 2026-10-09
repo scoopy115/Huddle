@@ -51,3 +51,6 @@ AuthKey_*
 
 # local assistant/tooling state
 .claude/
+
+# python packaging
+*.egg-info/

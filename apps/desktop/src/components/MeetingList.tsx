@@ -4,8 +4,8 @@ import { fmtClock, fmtDuration, fmtRelativeDay } from "@/lib/format";
 import { cn, speakerColor } from "@/lib/utils";
 import { Badge, Spinner } from "@/components/ui";
 
-const STAGE_WORD: Record<string, string> = { preprocessing: "Preparing audio", transcribing: "Transcribing", diarizing: "Detecting speakers", identifying_speakers: "Recognising voices", refining: "Applying feedback", extracting_actions: "Finding action items", summarizing: "Summarising", indexing: "Indexing" };
-export const STAGE_FAIL: Record<string, string> = { preprocessing: "Audio failed", transcribing: "Transcription failed", diarizing: "Speaker detection failed", identifying_speakers: "Voice recognition failed", refining: "Feedback failed", extracting_actions: "Action items failed", summarizing: "Summary failed", indexing: "Indexing failed" };
+const STAGE_WORD: Record<string, string> = { preprocessing: "Preparing audio", uploading: "Sending to server", remote_processing: "On the server", transcribing: "Transcribing", diarizing: "Detecting speakers", identifying_speakers: "Recognising voices", refining: "Applying feedback", extracting_actions: "Finding action items", summarizing: "Summarising", indexing: "Indexing" };
+export const STAGE_FAIL: Record<string, string> = { preprocessing: "Audio failed", uploading: "Upload failed", remote_processing: "Server failed", transcribing: "Transcription failed", diarizing: "Speaker detection failed", identifying_speakers: "Voice recognition failed", refining: "Feedback failed", extracting_actions: "Action items failed", summarizing: "Summary failed", indexing: "Indexing failed" };
 
 function statusBadge(m: Meeting) {
   switch (m.status) {

@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils";
 import { AI_MISSING_HINT, useNav } from "@/lib/nav";
 import { Button, DangerDialog, Dialog, Select } from "@/components/ui";
 import { ProjectPicker } from "@/components/ProjectPicker";
-import type { MeetingMode } from "@/types/engine";
+import type { MeetingMode, ProcessingTarget } from "@/types/engine";
 
 /** The subset of a meeting the actions need — satisfied by both the list item and the detail. */
 export interface MenuMeeting {
@@ -19,6 +19,7 @@ export interface MenuMeeting {
   speakerCountHint?: number | null;
   projectId?: string | null;
   mode?: MeetingMode;
+  processingTarget?: ProcessingTarget;
 }
 
 /** Notes styles a recording can be summarised in. */
@@ -45,6 +46,8 @@ export function useMeetingActions({ onChanged, onDeleted }: { onChanged: (m: Men
   const [langChoice, setLangChoice] = useState("");
   const [countChoice, setCountChoice] = useState(0);
   const [modeChoice, setModeChoice] = useState<MeetingMode>("meeting");
+  const [targetChoice, setTargetChoice] = useState<ProcessingTarget>("local");
+  const [serverName, setServerName] = useState<string | null>(null);   // null = no server set up
   const [error, setError] = useState<string | null>(null);
 
   const exportAs = async (m: MenuMeeting, format: "md" | "txt" | "json" | "srt") => {
@@ -90,6 +93,8 @@ export function useMeetingActions({ onChanged, onDeleted }: { onChanged: (m: Men
           setLangChoice(m.languageOverride ?? "");
           setCountChoice(m.speakerCountHint ?? 0);
           setModeChoice(m.mode ?? "meeting");
+          setTargetChoice(m.processingTarget ?? "local");
+          api.serverStatus().then((s) => setServerName(s.configured ? s.name || s.url : null)).catch(() => setServerName(null));
           setDialog("reprocess");
           break;
         case "delete":
@@ -118,7 +123,7 @@ export function useMeetingActions({ onChanged, onDeleted }: { onChanged: (m: Men
       <ProjectPicker open={dialog === "project"} onClose={close} currentId={target.projectId ?? null}
         onPick={async (pid) => { await api.setMeetingProject(target.id, pid); onChanged(target); }} />
       <Dialog open={dialog === "reprocess"} onClose={close} title="Reprocess meeting"
-        footer={<><Button variant="ghost" onClick={close}>Cancel</Button><Button variant="primary" onClick={async () => { close(); try { await api.process(target.id, { languageOverride: langChoice, speakerCount: countChoice, mode: modeChoice }); onChanged(target); } catch (e) { setError(errorMessage(e)); } }}>Start</Button></>}>
+        footer={<><Button variant="ghost" onClick={close}>Cancel</Button><Button variant="primary" onClick={async () => { close(); try { await api.process(target.id, { languageOverride: langChoice, speakerCount: countChoice, mode: modeChoice, target: targetChoice }); onChanged(target); } catch (e) { setError(errorMessage(e)); } }}>Start</Button></>}>
         <p className="mb-3 text-muted">Transcript, speakers and notes are generated again. The current version stays until each step has finished, so you can cancel at any time and keep what you have.</p>
         <label className="block text-[12px] text-muted">Spoken language</label>
         {langSelect}
@@ -130,6 +135,15 @@ export function useMeetingActions({ onChanged, onDeleted }: { onChanged: (m: Men
         <label className="mt-3 block text-[12px] text-muted">Notes style</label>
         {modeSelect}
         <p className="mt-1 text-[11.5px] text-muted">{MODE_OPTIONS.find((o) => o.value === modeChoice)?.hint}</p>
+        {(serverName || targetChoice === "remote") && (
+          <>
+            <label className="mt-3 block text-[12px] text-muted">Process on</label>
+            <Select wide className="mt-1" value={targetChoice} onChange={(e) => setTargetChoice(e.target.value as ProcessingTarget)}>
+              <option value="local">This Mac</option>
+              <option value="remote">{serverName ?? "The server"}</option>
+            </Select>
+          </>
+        )}
       </Dialog>
 
       <Dialog open={dialog === "mode"} onClose={close} title="Notes style"

@@ -15,6 +15,7 @@ import { languageOptions, systemLanguage } from "@/lib/languages";
 import { cn, modKey } from "@/lib/utils";
 import { Badge, Button, Card, DangerDialog, Dialog, InfoTip, Row, Select, Switch } from "@/components/ui";
 import { McpSection } from "@/screens/settings/McpSection";
+import { ServerSection } from "@/screens/settings/ServerSection";
 
 const SECTIONS = [
   { id: "general", label: "General" },
@@ -23,6 +24,7 @@ const SECTIONS = [
   { id: "speakers", label: "Speakers" },
   { id: "privacy", label: "Privacy" },
   { id: "mcp", label: "MCP" },
+  { id: "server", label: "Server" },
   { id: "advanced", label: "Advanced" },
 ];
 
@@ -86,6 +88,7 @@ export function SettingsScreen({ section, engine }: { section?: string; engine: 
               {active === "speakers" && <Speakers settings={settings} update={update} />}
               {active === "privacy" && <Privacy settings={settings} update={update} />}
               {active === "mcp" && <McpSection settings={settings} update={update} />}
+              {active === "server" && <ServerSection settings={settings} update={update} />}
               {active === "advanced" && <Advanced settings={settings} env={env} engine={engine} update={update} resolutions={resolutions} />}
             </>
           )}

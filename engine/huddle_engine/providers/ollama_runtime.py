@@ -22,7 +22,9 @@ import httpx
 
 log = logging.getLogger(__name__)
 
-SYSTEM_URL = "http://127.0.0.1:11434"
+# HUDDLE_OLLAMA_URL points at an Ollama elsewhere (Huddle Server: the `ollama` container); Huddle then
+# never starts its own.
+SYSTEM_URL = os.getenv("HUDDLE_OLLAMA_URL", "").rstrip("/") or "http://127.0.0.1:11434"
 MANAGED_HOST = "127.0.0.1:11435"
 MANAGED_URL = f"http://{MANAGED_HOST}"
 ARCHIVE_URL = "https://github.com/ollama/ollama/releases/latest/download/ollama-darwin.tgz"
@@ -72,7 +74,7 @@ def active_url(start: bool = True) -> str | None:
         return SYSTEM_URL
     if responds(MANAGED_URL):
         return MANAGED_URL
-    if start and binary() and ensure_started():
+    if start and not os.getenv("HUDDLE_OLLAMA_URL") and binary() and ensure_started():
         return MANAGED_URL
     return None
 

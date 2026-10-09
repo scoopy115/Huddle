@@ -7,7 +7,7 @@ import json
 import logging
 import os
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -42,6 +42,8 @@ class StageContext:
     memory_bytes: int | None = None
     progress: Any = None        # Callable[[float], None] — fraction 0..1 of the current stage
     cancelled: Any = None       # Callable[[], bool]
+    status: Any = None          # Callable[[str], None] — live detail text while the stage runs
+    run_stages: list[str] = field(default_factory=list)   # the stages of this run
 
     def resolver(self) -> ResolverContext:
         return ResolverContext(registry=self.registry, settings=self.settings, memory_bytes=self.memory_bytes)
@@ -49,6 +51,10 @@ class StageContext:
     def report(self, fraction: float) -> None:
         if self.progress:
             self.progress(fraction)
+
+    def note(self, text: str) -> None:
+        if self.status:
+            self.status(text)
 
     def check_cancelled(self) -> None:
         if self.cancelled and self.cancelled():
@@ -274,9 +280,11 @@ def identifying_speakers(ctx: StageContext) -> str:
 
     if not ctx.settings.get("speakers.recognition", True):
         return "Speaker recognition is disabled"
+    owner_row = ctx.db.one("SELECT owner FROM meetings WHERE id = ?", (ctx.meeting_id,))
     known = [{"id": r["id"], "name": r["name"], "embedding": json.loads(r["embedding"]),
               "model": r["embedding_model"] or LEGACY_EMBEDDING_MODEL}
-             for r in ctx.db.query("SELECT id, name, embedding, embedding_model FROM speakers WHERE embedding IS NOT NULL")]
+             for r in ctx.db.query("SELECT id, name, embedding, embedding_model FROM speakers WHERE embedding IS NOT NULL AND owner = ?",
+                                   ((owner_row["owner"] if owner_row else "") or "",))]
     if not known:
         return "No known voices yet — name a speaker to start recognising voices"
     rows = ctx.db.query("SELECT id, embedding, embedding_model FROM meeting_speakers WHERE meeting_id = ? AND embedding IS NOT NULL"
@@ -299,6 +307,13 @@ def identifying_speakers(ctx: StageContext) -> str:
                            (sid, round(float(score), 3), r["id"]))
             n += 1
     return f"{n} possible match{'es' if n != 1 else ''} suggested" if n else "No known voices recognised"
+
+
+def _notes_language(ctx: StageContext, meeting) -> str:
+    """The meeting's own notes language (set by a client that sent it to a server), else the app setting."""
+    from ..providers.summarize import LANG_NAMES
+    code = (getattr(meeting, "notes_language", None) or "").lower()
+    return code if code in LANG_NAMES else resolve_notes_language(ctx.settings)
 
 
 # ---- 5. summarizing --------------------------------------------------------- #
@@ -337,6 +352,10 @@ def _apply_inferred_names(ctx: StageContext, provider, plain: list[Segment]) -> 
 
 
 def summarizing(ctx: StageContext) -> str:
+    if "remote_processing" in ctx.run_stages:
+        row = ctx.db.one("SELECT provider FROM summaries WHERE meeting_id = ?", (ctx.meeting_id,))
+        if row and str(row["provider"] or "").startswith("server:"):
+            raise StageSkipped("Notes written by the server")
     segs, plain = _plain_segments(ctx)
     if not segs:
         raise ProviderError("There is no transcript to summarise yet.")
@@ -359,7 +378,7 @@ def summarizing(ctx: StageContext) -> str:
     date = datetime.fromtimestamp(meeting.started_at).strftime("%Y-%m-%d (%A)")
     notes = summarize(provider, plain, names, meeting_date=date,
                       language_hint=(meeting.language or "").replace(",", " + ") or None,
-                      notes_language=resolve_notes_language(ctx.settings),
+                      notes_language=_notes_language(ctx, meeting),
                       include_actions=bool(ctx.settings.get("notes.autoActionItems", False)),
                       user_context=html_to_text(meeting.context_html), mode=meeting.mode)
 
@@ -407,13 +426,106 @@ def summarizing(ctx: StageContext) -> str:
     try:
         from ..providers.summarize import LANG_NAMES
         from ..services import projects
-        code = resolve_notes_language(ctx.settings)
+        code = _notes_language(ctx, meeting)
         suggested = projects.suggest(ctx.db, ctx.meeting_id, provider, language=LANG_NAMES.get(code, code))
         if suggested:
             extra += f" · looks like part of “{suggested.name}”"
     except Exception:
         log.exception("project suggestion failed")
     return f"{res.model.name if res.model else notes.model}{extra}" + renamed
+
+
+# ---- 2r/3r. uploading + remote_processing (Huddle Server) ------------------- #
+REMOTE_STAGE_WEIGHT = {"preprocessing": 0.03, "transcribing": 0.55, "diarizing": 0.27, "identifying_speakers": 0.02,
+                       "summarizing": 0.12, "indexing": 0.01}
+REMOTE_STAGE_WORD = {"preprocessing": "Preparing audio", "transcribing": "Transcribing", "diarizing": "Detecting speakers",
+                     "identifying_speakers": "Checking voices", "summarizing": "Writing notes", "indexing": "Finishing"}
+
+
+def _server(ctx: StageContext):
+    from .. import server_client
+    sc = server_client.config_from_settings(ctx.cfg, ctx.settings)
+    if not sc:
+        raise ProviderError("No Huddle Server is set up. Add one under Settings → Server, or process on this Mac.")
+    return server_client, sc
+
+
+def uploading(ctx: StageContext) -> str:
+    """Send the prepared audio (16 kHz mono, FLAC-compressed) to the server. The server's copy
+    keeps the meeting id, so a retry resumes with the same recording."""
+    server_client, sc = _server(ctx)
+    wav = _processed_wav(ctx)
+    meeting = ms.get_meeting(ctx.db, ctx.meeting_id)
+    rec = ms.get_recording(ctx.db, ctx.meeting_id)
+    flac = wav.with_name("upload.flac")
+    ctx.note("Compressing audio")
+    data, sr = sf.read(str(wav), dtype="int16")
+    sf.write(str(flac), data, sr, format="FLAC", subtype="PCM_16")
+    ctx.check_cancelled()
+    meta = {"id": ctx.meeting_id, "title": meeting.title if not ms.is_default_title(meeting.title) else None,
+            "startedAt": meeting.started_at, "durationSec": rec.duration_sec if rec else meeting.duration_sec,
+            "language": meeting.language_override, "speakerCount": meeting.speaker_count_hint, "mode": meeting.mode,
+            "inputDevice": rec.input_device if rec else None, "notesLanguage": resolve_notes_language(ctx.settings),
+            "context": html_to_text(meeting.context_html) or None, "format": "flac", "sampleRate": sr, "channels": 1}
+    ctx.note("Uploading")
+    try:
+        try:
+            out = server_client.upload(sc, ctx.meeting_id, flac, meta, on_progress=ctx.report)
+        except server_client.UntrustedCertificate as e:
+            raise ProviderError("The server's certificate is not trusted yet. Confirm it under Settings → Server.", e.fingerprint)
+        except server_client.ServerError as e:
+            raise ProviderError(str(e), e.detail)
+    finally:
+        flac.unlink(missing_ok=True)
+    ms.set_remote(ctx.db, ctx.meeting_id, str(out.get("id") or ctx.meeting_id))
+    size_mb = (data.nbytes * 0.55) / 1e6
+    return f"{(rec.duration_sec or 0) / 60:.0f} min sent to {sc.host}" if rec else f"sent to {sc.host} (~{size_mb:.0f} MB)"
+
+
+def remote_processing(ctx: StageContext) -> str:
+    """Wait for the server, then import its result: transcript, speakers (with voice embeddings so
+    known voices can be recognised here) and the notes when the server wrote them."""
+    from ..services.bundle import import_bundle
+    server_client, sc = _server(ctx)
+    meeting = ms.get_meeting(ctx.db, ctx.meeting_id)
+    rid = meeting.remote_id or ctx.meeting_id
+    try:
+        st = server_client.status(sc, rid)
+        if st.get("state") == "failed":
+            st = server_client.retry(sc, rid)
+        last_note = None
+        while st.get("state") not in ("ready", "failed"):
+            if ctx.cancelled and ctx.cancelled():
+                server_client.cancel(sc, rid)
+                raise JobCancelled()
+            stages = (st.get("job") or {}).get("stages") or {}
+            done = sum(w for n, w in REMOTE_STAGE_WEIGHT.items() if stages.get(n, {}).get("status") == "done")
+            cur = (st.get("job") or {}).get("currentStage")
+            if cur in REMOTE_STAGE_WEIGHT:
+                done += REMOTE_STAGE_WEIGHT[cur] * float(stages.get(cur, {}).get("progress") or 0.0)
+            ctx.report(min(0.98, done))
+            note = REMOTE_STAGE_WORD.get(cur or "", "Waiting for the server") if st.get("state") == "running" else "Queued on the server"
+            if note != last_note:
+                ctx.note(note)
+                last_note = note
+            time.sleep(2.0)
+            st = server_client.status(sc, rid)
+        if st.get("state") == "failed":
+            raise ProviderError(f"The server could not process this recording: {st.get('error') or 'unknown error'}",
+                                st.get("errorDetail"))
+        ctx.note("Fetching the result")
+        bundle = server_client.result(sc, rid)
+    except server_client.UntrustedCertificate as e:
+        raise ProviderError("The server's certificate is not trusted yet. Confirm it under Settings → Server.", e.fingerprint)
+    except server_client.ServerError as e:
+        raise ProviderError(str(e), e.detail)
+    ctx.check_cancelled()
+    counts = import_bundle(ctx.db, ctx.meeting_id, bundle)
+    ctx.report(1.0)
+    parts = [f"{counts['segments']} segments", f"{counts['speakers']} speaker{'s' if counts['speakers'] != 1 else ''}"]
+    if counts["notes"]:
+        parts.append("notes")
+    return " · ".join(parts) + f" from {sc.host}"
 
 
 # ---- 6. indexing ------------------------------------------------------------ #
@@ -503,7 +615,7 @@ def extracting_actions(ctx: StageContext) -> str:
         c.execute("DELETE FROM action_items WHERE meeting_id = ? AND source = 'auto'", (ctx.meeting_id,))
     total = 0
     for i, n_chunks, items in iter_action_items(provider, plain, names, meeting_date=date,
-                                                notes_language=resolve_notes_language(ctx.settings),
+                                                notes_language=_notes_language(ctx, meeting),
                                                 user_context=html_to_text(meeting.context_html)):
         ctx.check_cancelled()
         with ctx.db.tx() as c:
@@ -519,6 +631,8 @@ def extracting_actions(ctx: StageContext) -> str:
 
 STAGE_FUNCS = {
     "preprocessing": preprocessing,
+    "uploading": uploading,
+    "remote_processing": remote_processing,
     "transcribing": transcribing,
     "diarizing": diarizing,
     "identifying_speakers": identifying_speakers,
@@ -530,6 +644,8 @@ STAGE_FUNCS = {
 
 DOWNSTREAM = {
     "preprocessing": ["transcribing", "diarizing", "identifying_speakers", "summarizing", "indexing"],
+    "uploading": ["remote_processing", "identifying_speakers", "summarizing", "indexing"],
+    "remote_processing": ["identifying_speakers", "summarizing", "indexing"],
     "transcribing": ["diarizing", "identifying_speakers", "summarizing", "indexing"],
     "diarizing": ["identifying_speakers", "summarizing"],
     "identifying_speakers": [],
@@ -538,3 +654,14 @@ DOWNSTREAM = {
     "extracting_actions": [],
     "indexing": [],
 }
+# For a meeting processed on a server, transcription and speaker detection happen there.
+REMOTE_DOWNSTREAM = {
+    **DOWNSTREAM,
+    "preprocessing": ["uploading", "remote_processing", "identifying_speakers", "summarizing", "indexing"],
+    "transcribing": ["uploading", "remote_processing", "identifying_speakers", "summarizing", "indexing"],
+    "diarizing": ["uploading", "remote_processing", "identifying_speakers", "summarizing", "indexing"],
+}
+
+
+def downstream(stage: str, target: str) -> list[str]:
+    return list((REMOTE_DOWNSTREAM if target == "remote" else DOWNSTREAM)[stage])

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowLeft, Calendar, CalendarClock, Check, CheckCircle2, Circle, Clock, Folder, Languages, MessageCircleQuestion, MessageSquareText, MoreHorizontal, Pencil, Plus, Sparkles, Timer, Trash2, User, Wand2, X } from "lucide-react";
+import { ArrowLeft, Calendar, CalendarClock, Check, CheckCircle2, Circle, Clock, Folder, Languages, MessageCircleQuestion, MessageSquareText, MoreHorizontal, Pencil, Plus, Server, Sparkles, Timer, Trash2, User, Wand2, X } from "lucide-react";
 import { RichTextEditor } from "@/components/RichTextEditor";
 import { api, errorMessage } from "@/lib/api";
 import type { ActionItem, AskResult, MeetingDetail, MeetingSpeaker } from "@/types/engine";
@@ -147,6 +147,7 @@ export function MeetingScreen({ id, seek, segmentId, nonce, onChanged }: { id: s
             {m.durationSec ? <span className="inline-flex items-center gap-1.5"><Timer className="h-3.5 w-3.5" />{fmtDuration(m.durationSec)}</span> : null}
             {m.language && <button className="inline-flex items-center gap-1.5 hover:text-fg" title="Wrong language? Click to change" onClick={() => actions.run("language", m)}><Languages className="h-3.5 w-3.5" />{langLabel(m.language)}</button>}
             <button className="inline-flex items-center gap-1.5 hover:text-fg" title="Notes style — click to change" onClick={() => actions.run("mode", m)}><MessageCircleQuestion className="h-3.5 w-3.5" />{modeLabel(m.mode)}</button>
+            {m.processingTarget === "remote" && <span className="inline-flex items-center gap-1.5" title="Processed on your Huddle Server"><Server className="h-3.5 w-3.5" />Server</span>}
             <button className={cn("inline-flex items-center gap-1.5 hover:text-fg", m.projectId && "text-fg/80")} title={m.projectId ? "Click to move to another project" : "Put this meeting in a project"} onClick={() => setPickProject(true)}>
               <Folder className="h-3.5 w-3.5" />{m.projectName ?? <span className="italic">No project</span>}
             </button>

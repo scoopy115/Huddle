@@ -34,7 +34,7 @@ def _default_data_dir() -> Path:
 @dataclass
 class EngineConfig:
     data_dir: Path = field(default_factory=_default_data_dir)
-    host: str = "127.0.0.1"
+    host: str = field(default_factory=lambda: os.getenv("HUDDLE_HOST", "127.0.0.1"))
     port: int = int(os.getenv("HUDDLE_PORT", "48731"))
     token: str | None = os.getenv("HUDDLE_TOKEN") or None
     models_dir_override: Path | None = None
@@ -98,6 +98,12 @@ DEFAULT_USER_SETTINGS: dict[str, Any] = {
     "mcp.enabled": True,                     # stdio server for local clients
     "mcp.networkEnabled": False,             # streamable-http on the LAN, API-key protected
     "mcp.port": 48800,
+    # Huddle Server (self-hosted): where recordings can be processed instead of on this machine
+    "server.url": "",                        # https://host[:port] — empty = no server configured
+    "server.apiKey": "",                     # hsk_… client key generated in the server dashboard
+    "server.caFingerprint": "",              # SHA-256 of a trusted self-signed root (empty = system trust)
+    "server.name": "",                       # as reported by the server on the last successful test
+    "server.defaultTarget": "ask",           # ask | local | remote — where new recordings are processed
     # advanced
     "developer.mode": False,
     # onboarding

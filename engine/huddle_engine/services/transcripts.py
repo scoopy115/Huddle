@@ -66,12 +66,13 @@ def speaker_names(db: Database, meeting_id: str) -> dict[str | None, str]:
     return {s.label: (s.display_name or s.speaker_name or s.label) for s in speakers(db, meeting_id)}
 
 
-def _upsert_known_speaker(db: Database, name: str, embedding: list[float] | None, model: str | None = None) -> int:
-    """Fold a cluster's voice embedding into the named person's profile. A profile only ever
-    mixes vectors of one embedding model; a vector from another model starts the profile over."""
+def _upsert_known_speaker(db: Database, name: str, embedding: list[float] | None, model: str | None = None,
+                          owner: str = "") -> int:
+    """Fold a cluster's voice embedding into the named person's profile (per owner). A profile only
+    ever mixes vectors of one embedding model; a vector from another model starts the profile over."""
     from .voices import running_mean
     now = time.time()
-    row = db.one("SELECT id, embedding, n_samples, embedding_model FROM speakers WHERE name = ?", (name,))
+    row = db.one("SELECT id, embedding, n_samples, embedding_model FROM speakers WHERE owner = ? AND name = ?", (owner, name))
     if row:
         if embedding:
             old = json.loads(row["embedding"]) if row["embedding"] else []
@@ -80,8 +81,8 @@ def _upsert_known_speaker(db: Database, name: str, embedding: list[float] | None
             db.execute("UPDATE speakers SET embedding = ?, n_samples = ?, embedding_model = ?, updated_at = ? WHERE id = ?",
                        (json.dumps(merged), (row["n_samples"] + 1) if same_model else 1, model, now, row["id"]))
         return row["id"]
-    cur = db.execute("INSERT INTO speakers(name, embedding, n_samples, embedding_model, created_at, updated_at) VALUES (?,?,?,?,?,?)",
-                     (name, json.dumps(embedding) if embedding else None, 1 if embedding else 0, model if embedding else None, now, now))
+    cur = db.execute("INSERT INTO speakers(name, embedding, n_samples, embedding_model, created_at, updated_at, owner) VALUES (?,?,?,?,?,?,?)",
+                     (name, json.dumps(embedding) if embedding else None, 1 if embedding else 0, model if embedding else None, now, now, owner))
     return int(cur.lastrowid)
 
 
@@ -133,7 +134,9 @@ def rename_speaker(db: Database, meeting_speaker_id: int, name: str, enroll: boo
         speaker_id = None
         if enroll:
             emb = json.loads(row["embedding"]) if row["embedding"] else None
-            speaker_id = _upsert_known_speaker(db, name, emb, row["embedding_model"] if "embedding_model" in row.keys() else None)  # noqa: SIM118 (sqlite3.Row)
+            owner_row = db.one("SELECT owner FROM meetings WHERE id = ?", (row["meeting_id"],))
+            speaker_id = _upsert_known_speaker(db, name, emb, row["embedding_model"] if "embedding_model" in row.keys() else None,  # noqa: SIM118 (sqlite3.Row)
+                                               owner=(owner_row["owner"] if owner_row else "") or "")
         db.execute("UPDATE meeting_speakers SET display_name = ?, speaker_id = ?, suggested_speaker_id = NULL,"
                    " suggested_confidence = NULL, name_source = 'user' WHERE id = ?", (name, speaker_id, meeting_speaker_id))
         propagate_name(db, row["meeting_id"], old, name)
@@ -174,11 +177,11 @@ def update_segment(db: Database, segment_id: int, text: str | None, meeting_spea
                              confidence=r["confidence"])
 
 
-def known_speakers(db: Database) -> list[dict]:
+def known_speakers(db: Database, owner: str = "") -> list[dict]:
     return [{"id": r["id"], "name": r["name"], "nSamples": r["n_samples"], "hasEmbedding": bool(r["embedding"]),
              "meetingCount": r["mc"], "updatedAt": r["updated_at"]}
             for r in db.query("SELECT sp.*, (SELECT COUNT(*) FROM meeting_speakers ms WHERE ms.speaker_id = sp.id) AS mc"
-                              " FROM speakers sp ORDER BY sp.name")]
+                              " FROM speakers sp WHERE sp.owner = ? ORDER BY sp.name", (owner,))]
 
 
 def delete_known_speaker(db: Database, speaker_id: int) -> None:

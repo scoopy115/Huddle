@@ -12,6 +12,7 @@ from ..audio import SUPPORTED_EXT
 from ..db import Database
 from ..schemas import (
     MODES,
+    TARGETS,
     ActionItem,
     CreateFromRecordingRequest,
     Decision,
@@ -59,6 +60,10 @@ def _row_meeting(r, extras: dict | None = None) -> Meeting:
                    speaker_count_hint=r["speaker_count_hint"] if "speaker_count_hint" in keys else None,
                    context_html=r["context_html"] if "context_html" in keys else None,
                    mode=(r["mode"] if "mode" in keys and r["mode"] in MODES else "meeting"),
+                   processing_target=(r["processing_target"] if "processing_target" in keys and r["processing_target"] in TARGETS else "local"),
+                   remote_id=r["remote_id"] if "remote_id" in keys else None,
+                   notes_language=r["notes_language"] if "notes_language" in keys else None,
+                   owner=(r["owner"] or "") if "owner" in keys else "",
                    status=r["status"], source=r["source"], notes=r["notes"],
                    project_id=r["project_id"] if "project_id" in keys else None,
                    project_name=e.get("project_name"),
@@ -87,10 +92,12 @@ def create_from_recording(db: Database, cfg: EngineConfig, req: CreateFromRecord
     size = path.stat().st_size if path.exists() else None
     with db.tx() as c:
         c.execute("INSERT INTO meetings(id,title,created_at,started_at,ended_at,duration_sec,status,source,language_override,"
-                  "speaker_count_hint,mode) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                  "speaker_count_hint,mode,processing_target,notes_language,owner) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                   (req.id, req.title or default_title(started), now, started, started + req.duration_sec,
                    req.duration_sec, "saved", req.source, (req.language or None) if req.language != "auto" else None,
-                   req.speaker_count or None, req.mode if req.mode in MODES else "meeting"))
+                   req.speaker_count or None, req.mode if req.mode in MODES else "meeting",
+                   req.processing_target if req.processing_target in TARGETS else "local",
+                   (req.notes_language or "").strip()[:8] or None, req.owner or ""))
         c.execute("INSERT INTO recordings(id,meeting_id,file_path,system_file_path,format,sample_rate,channels,duration_sec,"
                   "size_bytes,input_device,started_at,status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
                   (f"rec-{req.id}", req.id, str(path), req.system_file_path, req.format, req.sample_rate, req.channels,
@@ -237,7 +244,7 @@ def get_detail(db: Database, meeting_id: str) -> MeetingDetail | None:
 def update_meeting(db: Database, meeting_id: str, title: str | None = None, notes: str | None = None,
                    language_override: str | None = None, speaker_count_hint: int | None = None,
                    context_html: str | None = None, project_id: str | None = None,
-                   mode: str | None = None) -> Meeting | None:
+                   mode: str | None = None, processing_target: str | None = None) -> Meeting | None:
     if project_id is not None:
         from . import projects
         projects.assign(db, meeting_id, project_id.strip() or None)
@@ -262,9 +269,24 @@ def update_meeting(db: Database, meeting_id: str, title: str | None = None, note
             raise ValueError(f"Unknown mode '{mode}'")
         sets.append("mode = ?")
         args.append(mode)
+    if processing_target is not None:
+        if processing_target not in TARGETS:
+            raise ValueError(f"Unknown processing target '{processing_target}'")
+        sets.append("processing_target = ?")
+        args.append(processing_target)
     if sets:
         db.execute(f"UPDATE meetings SET {', '.join(sets)} WHERE id = ?", (*args, meeting_id))
     return get_meeting(db, meeting_id)
+
+
+def processing_target(db: Database, meeting_id: str) -> str:
+    r = db.one("SELECT processing_target FROM meetings WHERE id = ?", (meeting_id,))
+    return r["processing_target"] if r and r["processing_target"] in TARGETS else "local"
+
+
+def set_remote(db: Database, meeting_id: str, remote_id: str | None) -> None:
+    db.execute("UPDATE meetings SET remote_id = ?, remote_uploaded_at = ? WHERE id = ?",
+               (remote_id, time.time() if remote_id else None, meeting_id))
 
 
 def delete_meeting(db: Database, cfg: EngineConfig, meeting_id: str) -> None:
