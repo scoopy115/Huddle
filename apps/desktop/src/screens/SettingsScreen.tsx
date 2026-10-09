@@ -12,7 +12,7 @@ import { useNav } from "@/lib/nav";
 import type { DownloadCandidate, DownloadProgress, Environment, KnownSpeaker, LocalModel, Resolution, StorageInfo, UserSettings } from "@/types/engine";
 import { fmtBytes, languageName } from "@/lib/format";
 import { languageOptions, systemLanguage } from "@/lib/languages";
-import { cn, modKey } from "@/lib/utils";
+import { cn, fileManager, isMac, platformName, recordShortcut, trayName } from "@/lib/utils";
 import { Badge, Button, Card, DangerDialog, Dialog, InfoTip, Row, Select, Switch } from "@/components/ui";
 import { McpSection } from "@/screens/settings/McpSection";
 
@@ -157,9 +157,9 @@ function General({ settings, update }: { settings: UserSettings; update: Update 
         </Row>
       </Card>
 
-      <h3 className="mb-2 mt-6 font-display text-[11.5px] font-bold uppercase tracking-wider text-muted">Menu bar</h3>
+      <h3 className="mb-2 mt-6 font-display text-[11.5px] font-bold uppercase tracking-wider text-muted">{isMac ? "Menu bar" : "System tray"}</h3>
       <Card>
-        <Row label="Keep Huddle in the menu bar" hint={`Closing the window keeps a small recorder in the menu bar. ${modKey}⌥R starts or stops a recording from anywhere.`}>
+        <Row label={`Keep Huddle in the ${trayName}`} hint={`Closing the window keeps a small recorder in the ${trayName}. ${recordShortcut} starts or stops a recording from anywhere.`}>
           <Switch checked={!!settings["general.menuBar"]} onChange={(v) => update({ "general.menuBar": v })} />
         </Row>
       </Card>
@@ -204,7 +204,7 @@ function General({ settings, update }: { settings: UserSettings; update: Update 
           )}
         </div>
         <Row label="Storage location" hint={storage?.dataDir ?? ""}>
-          <Button size="sm" onClick={() => storage && native.revealInFinder(storage.dataDir).catch(() => {})}><FolderOpen className="h-3.5 w-3.5" /> Show in Finder</Button>
+          <Button size="sm" onClick={() => storage && native.revealInFinder(storage.dataDir).catch(() => {})}><FolderOpen className="h-3.5 w-3.5" /> Show in {fileManager}</Button>
         </Row>
       </Card>
     </>
@@ -244,11 +244,12 @@ function Recording({ settings, update }: { settings: UserSettings; update: Updat
 
 // ---- Models ---------------------------------------------------------------------------------------
 
-function CandidateRow({ c, progress, installed, memoryBytes, onStart, onCancel }: { c: DownloadCandidate; progress?: DownloadProgress; installed: boolean; memoryBytes?: number | null; onStart: () => void; onCancel: () => void }) {
+function CandidateRow({ c, progress, installed, onStart, onCancel }: { c: DownloadCandidate; progress?: DownloadProgress; installed: boolean; onStart: () => void; onCancel: () => void }) {
   const pct = progress && progress.totalBytes ? Math.round((progress.receivedBytes / progress.totalBytes) * 100) : 0;
   const active = progress && (progress.state === "downloading" || progress.state === "verifying");
-  // Greyed out when this Mac has less memory than the model needs; the row stays visible so the option is known.
-  const tooBig = !!c.minMemoryBytes && !!memoryBytes && memoryBytes < c.minMemoryBytes;
+  // The engine judged the fit for this computer (memory, graphics memory, CPU-only): a model that
+  // cannot run is greyed out but stays visible so the option is known; a slow one gets a warning.
+  const tooBig = c.fit === "no";
   return (
     <div className={cn("flex items-start gap-3 border-b border-border px-4 py-3 last:border-b-0", tooBig && !installed && "opacity-50")}>
       <div className="min-w-0 flex-1">
@@ -261,14 +262,14 @@ function CandidateRow({ c, progress, installed, memoryBytes, onStart, onCancel }
           <span className="inline-flex items-center gap-1"><Download className="h-3 w-3" />{c.sizeBytes ? fmtBytes(c.sizeBytes) : "size varies"}</span>
         </div>
         {c.description && <div className="mt-0.5 text-[12px] text-muted">{c.description}</div>}
-        {tooBig && !installed && <div className="mt-0.5 text-[12px] text-danger">Needs {fmtBytes(c.minMemoryBytes!)} of memory; this Mac has {fmtBytes(memoryBytes!)}.</div>}
+        {c.fitReason && !installed && <div className={cn("mt-0.5 text-[12px]", tooBig ? "text-danger" : "text-amber-600 dark:text-amber-400")}>{c.fitReason}</div>}
         {active && <div className="mt-1.5 h-1 w-full overflow-hidden rounded bg-fg/10"><div className="h-full bg-accent transition-all" style={{ width: `${pct}%` }} /></div>}
         {progress?.state === "failed" && <div className="mt-1 text-[12px] text-danger">{progress.error}</div>}
       </div>
       <div className="shrink-0">
         {installed ? <Badge tone="good"><Check className="h-3 w-3" /> Installed</Badge>
           : active ? <div className="flex items-center gap-2 text-[12px] text-muted">{progress.state === "verifying" ? "Finishing…" : `${pct}%`}<Button size="sm" variant="ghost" onClick={onCancel}>Cancel</Button></div>
-          : <Button size="sm" disabled={tooBig} title={tooBig ? "Not enough memory on this Mac" : undefined} onClick={onStart}><Download className="h-3.5 w-3.5" /> Download</Button>}
+          : <Button size="sm" disabled={tooBig} title={tooBig ? c.fitReason ?? undefined : undefined} onClick={onStart}><Download className="h-3.5 w-3.5" /> Download</Button>}
       </div>
     </div>
   );
@@ -358,8 +359,8 @@ function Models({ settings, env, resolutions, update, reload, initialTab }: { se
     <>
       <div className="mb-4 grid grid-cols-2 gap-3">
         <Card className="p-4">
-          <div className="mb-2 flex items-center gap-1.5 font-display text-[11.5px] font-bold uppercase tracking-wider text-muted"><Star className="h-3.5 w-3.5" /> Recommended for this Mac</div>
-          <div className="text-[12px] text-muted">{env.hardware.cpuBrand} · {fmtBytes(env.hardware.memoryBytes)}</div>
+          <div className="mb-2 flex items-center gap-1.5 font-display text-[11.5px] font-bold uppercase tracking-wider text-muted"><Star className="h-3.5 w-3.5" /> Recommended for this {platformName}</div>
+          <div className="text-[12px] text-muted">{[env.hardware.cpuBrand, fmtBytes(env.hardware.memoryBytes), env.hardware.unifiedMemory ? null : env.hardware.acceleratorName].filter(Boolean).join(" · ")} · {env.hardware.capability.title}</div>
           <div className="mt-2 flex items-start gap-2 text-[13px]"><Mic className="mt-[3px] h-3.5 w-3.5 text-muted" /><div><div className="font-medium">{nameOf(recWhisper)}</div><div className="text-[11.5px] text-muted">{installedFlag(recWhisper) ? "Installed" : "Available in the marketplace"}</div></div></div>
           <div className="mt-2 flex items-start gap-2 text-[13px]"><Sparkles className="mt-[3px] h-3.5 w-3.5 text-muted" /><div><div className="font-medium">{nameOf(recAi)}</div><div className="text-[11.5px] text-muted">{installedFlag(recAi) ? "Installed" : "Available in the marketplace"}</div></div></div>
         </Card>
@@ -371,7 +372,7 @@ function Models({ settings, env, resolutions, update, reload, initialTab }: { se
         </Card>
       </div>
       <Card className="mb-4">
-        <Row label="Compute device" info="Where transcription runs. Metal uses the GPU of Apple Silicon Macs and is several times faster than the CPU.">
+        <Row label="Compute device" info="Where transcription runs. A GPU (Metal on Apple Silicon, CUDA on NVIDIA) is several times faster than the CPU.">
           <ComputeSelect env={env} value={settings["general.computeDevice"]} onChange={(v) => update({ "general.computeDevice": v })} />
         </Row>
       </Card>
@@ -395,16 +396,20 @@ function Models({ settings, env, resolutions, update, reload, initialTab }: { se
           </Card>
           <h3 className="mb-2 mt-6 font-display text-[11.5px] font-bold uppercase tracking-wider text-muted">Model marketplace</h3>
           <Card>
-            {candsFor("transcription").map((c) => <CandidateRow key={c.id} c={c} installed={isInstalled(c)} memoryBytes={env.hardware.memoryBytes} progress={downloads.find((d) => d.id === c.id)} onStart={() => api.startDownload(c.id).then(() => api.downloads().then(setDownloads))} onCancel={() => api.cancelDownload(c.id)} />)}
+            {candsFor("transcription").map((c) => <CandidateRow key={c.id} c={c} installed={isInstalled(c)} progress={downloads.find((d) => d.id === c.id)} onStart={() => api.startDownload(c.id).then(() => api.downloads().then(setDownloads))} onCancel={() => api.cancelDownload(c.id)} />)}
           </Card>
         </>
       )}
 
       {tab === "summaries" && (
         <>
-          {ollama?.status !== "available" && (
+          {aiRes?.status === "unsupported" ? (
+            <div className="mb-3 rounded-lg border border-danger/30 bg-danger/5 px-3 py-2.5 text-[12.5px]">
+              This {platformName} cannot run a local AI model: {aiRes.reason} Transcripts still work; summaries, decisions and Ask need an AI model.
+            </div>
+          ) : ollama?.status !== "available" && (
             <div className="mb-3 rounded-lg border border-border bg-bg px-3 py-2.5 text-[12.5px] text-muted">
-              No AI runtime on this Mac yet. Huddle downloads its own (about 150 MB) together with the first model you pick below; nothing to install by hand.
+              No AI runtime on this {platformName} yet. Huddle downloads its own together with the first model you pick below; nothing to install by hand.
             </div>
           )}
           <Card>
@@ -417,7 +422,7 @@ function Models({ settings, env, resolutions, update, reload, initialTab }: { se
           </Card>
           <h3 className="mb-2 mt-6 font-display text-[11.5px] font-bold uppercase tracking-wider text-muted">Model marketplace</h3>
           <Card>
-            {candsFor("llm").map((c) => <CandidateRow key={c.id} c={c} installed={isInstalled(c)} memoryBytes={env.hardware.memoryBytes} progress={downloads.find((d) => d.id === c.id)} onStart={() => api.startDownload(c.id).then(() => api.downloads().then(setDownloads))} onCancel={() => api.cancelDownload(c.id)} />)}
+            {candsFor("llm").map((c) => <CandidateRow key={c.id} c={c} installed={isInstalled(c)} progress={downloads.find((d) => d.id === c.id)} onStart={() => api.startDownload(c.id).then(() => api.downloads().then(setDownloads))} onCancel={() => api.cancelDownload(c.id)} />)}
           </Card>
         </>
       )}
@@ -487,7 +492,7 @@ function Privacy({ settings, update }: { settings: UserSettings; update: Update 
       <DangerDialog open={!!confirm} onClose={() => setConfirm(null)} title={confirm === "meetings" ? "Delete all meeting data?" : "Delete voice profiles?"}
         confirmLabel={confirm === "meetings" ? "Delete everything" : "Delete profiles"}
         onConfirm={async () => { if (confirm === "meetings") await api.deleteAllMeetings(); else await api.deleteSpeakerEmbeddings(); setConfirm(null); }}>
-        {confirm === "meetings" ? "This permanently removes all meetings, recordings, transcripts, summaries and action items from this Mac. There is no undo." : "All stored voice embeddings will be removed permanently. Huddle will no longer recognise known voices until you name them again."}
+        {confirm === "meetings" ? `This permanently removes all meetings, recordings, transcripts, summaries and action items from this ${platformName}. There is no undo.` : "All stored voice embeddings will be removed permanently. Huddle will no longer recognise known voices until you name them again."}
       </DangerDialog>
     </>
   );

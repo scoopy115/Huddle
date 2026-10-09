@@ -5,7 +5,7 @@ import { native, type McpCommand, type ProxyStatus } from "@/lib/native";
 import { syncNetworkProxy } from "@/lib/mcpProxy";
 import type { ApiKey, McpStatus, UserSettings } from "@/types/engine";
 import { fmtDate } from "@/lib/format";
-import { cn } from "@/lib/utils";
+import { cn, platformName } from "@/lib/utils";
 import { MCP_CLIENTS, localRecipe, networkRecipe, type McpClientId, type Recipe } from "@/lib/mcpClients";
 import { Badge, Button, Card, DangerDialog, Dialog, Input, Row, Select, Switch } from "@/components/ui";
 
@@ -74,7 +74,7 @@ export function McpSection({ settings, update }: { settings: UserSettings; updat
   return (
     <>
       <Card>
-        <Row label="Local MCP server" info="Lets AI apps on this Mac (Claude Code, Claude Desktop, Cursor, …) search and read your meetings.">
+        <Row label="Local MCP server" info={`Lets AI apps on this ${platformName} (Claude Code, Claude Desktop, Cursor, …) search and read your meetings.`}>
           <Switch checked={settings["mcp.enabled"]} onChange={(v) => update({ "mcp.enabled": v })} />
         </Row>
         <Row label="Network access" info="Also serve MCP to clients on other computers on your local network. Every client authenticates with its own API key, generated below.">
@@ -127,7 +127,7 @@ export function McpSection({ settings, update }: { settings: UserSettings; updat
             <ClientSelect className="mt-1 !w-full" value={client} onChange={(c) => { setClient(c); setName(MCP_CLIENTS.find((x) => x.id === c)?.label ?? ""); }} />
             <p className="mt-1 text-[11.5px] text-muted">After generating, you get the exact setup steps for this client with the key filled in.</p>
             <label className="mt-3 block text-[12px] text-muted">Key name</label>
-            <Input autoFocus placeholder="e.g. Cursor on the studio Mac" value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === "Enter" && create()} className="mt-1" />
+            <Input autoFocus placeholder="e.g. Cursor on the studio laptop" value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === "Enter" && create()} className="mt-1" />
             <label className="mt-3 block text-[12px] text-muted">Valid for</label>
             <div className="mt-1 flex gap-2">
               {[30, 60, 90].map((d) => (
@@ -151,7 +151,7 @@ export function McpSection({ settings, update }: { settings: UserSettings; updat
         </>
       )}
 
-      <h3 className="mb-2 mt-6 font-display text-[11.5px] font-bold uppercase tracking-wider text-muted">Connect a client on this Mac</h3>
+      <h3 className="mb-2 mt-6 font-display text-[11.5px] font-bold uppercase tracking-wider text-muted">Connect a client on this {platformName}</h3>
       <Card>
         <div className="px-4 py-3">
           <div className="mb-3 flex items-center justify-between gap-3">

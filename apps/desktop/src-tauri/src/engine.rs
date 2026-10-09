@@ -11,6 +11,22 @@
 
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
+
+/// The packaged sidecar's file name (PyInstaller adds `.exe` on Windows).
+const SIDECAR: &str = if cfg!(windows) { "huddle-engine.exe" } else { "huddle-engine" };
+/// The dev venv's interpreter, relative to `engine/`.
+const VENV_PYTHON: &str = if cfg!(windows) { ".venv/Scripts/python.exe" } else { ".venv/bin/python" };
+
+/// Child processes of the shell never get a console window on Windows (the sidecar is a console
+/// program; without this flag a black window pops up behind the app).
+pub(crate) fn quiet(cmd: &mut Command) -> &mut Command {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    }
+    cmd
+}
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -74,8 +90,8 @@ fn locate_engine(app: &AppHandle) -> Option<(PathBuf, Vec<String>, String)> {
     // 3. Bundled sidecar (release builds).
     if let Ok(resource_dir) = app.path().resource_dir() {
         for candidate in [
-            resource_dir.join("engine").join("huddle-engine"),
-            resource_dir.join("huddle-engine"),
+            resource_dir.join("engine").join(SIDECAR),
+            resource_dir.join(SIDECAR),
         ] {
             if candidate.exists() {
                 return Some((candidate.clone(), vec!["serve".into()], candidate.display().to_string()));
@@ -84,7 +100,7 @@ fn locate_engine(app: &AppHandle) -> Option<(PathBuf, Vec<String>, String)> {
     }
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
-            let sidecar = dir.join("huddle-engine");
+            let sidecar = dir.join(SIDECAR);
             if sidecar.exists() {
                 return Some((sidecar.clone(), vec!["serve".into()], sidecar.display().to_string()));
             }
@@ -97,7 +113,7 @@ fn locate_engine(app: &AppHandle) -> Option<(PathBuf, Vec<String>, String)> {
 /// The repository's engine venv (`python -m huddle_engine serve`), if this checkout has one.
 fn dev_venv_engine() -> Option<(PathBuf, Vec<String>, String)> {
     let repo_engine = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../engine");
-    let py = repo_engine.join(".venv/bin/python");
+    let py = repo_engine.join(VENV_PYTHON);
     if py.exists() {
         return Some((
             py.clone(),
@@ -186,6 +202,7 @@ async fn spawn(app: &AppHandle, data_dir: PathBuf) -> anyhow::Result<()> {
     let log_file_err = log_file.try_clone()?;
 
     let mut cmd = Command::new(&prog);
+    quiet(&mut cmd);
     cmd.args(&args)
         .env("HUDDLE_DATA_DIR", &data_dir)
         .env("HUDDLE_PORT", port.to_string())
@@ -199,7 +216,7 @@ async fn spawn(app: &AppHandle, data_dir: PathBuf) -> anyhow::Result<()> {
         .stderr(Stdio::from(log_file_err))
         .stdin(Stdio::null());
     if let Some(parent) = prog.parent().and_then(|p| p.parent()).and_then(|p| p.parent()) {
-        // dev venv: <engine>/.venv/bin/python → cwd = <engine>
+        // dev venv: <engine>/.venv/bin/python (Scripts/python.exe on Windows) → cwd = <engine>
         if parent.join("huddle_engine").exists() {
             cmd.current_dir(parent);
         }
@@ -339,7 +356,17 @@ fn kill_stale_engine(data_dir: &std::path::Path) {
     }
     #[cfg(windows)]
     {
-        let _ = std::process::Command::new("taskkill").args(["/PID", &pid.to_string(), "/F"]).status();
+        // Same rule: only a process that is really our sidecar (pids get reused after a reboot).
+        let mut list = std::process::Command::new("tasklist");
+        quiet(&mut list);
+        let out = list.args(["/FI", &format!("PID eq {pid}"), "/FO", "CSV", "/NH"]).output();
+        let is_engine = out.map(|o| String::from_utf8_lossy(&o.stdout).to_lowercase()).is_ok_and(|s| s.contains("huddle-engine") || s.contains("python"));
+        if is_engine {
+            log::warn!("killing stale engine pid {pid}");
+            let mut kill = std::process::Command::new("taskkill");
+            quiet(&mut kill);
+            let _ = kill.args(["/PID", &pid.to_string(), "/T", "/F"]).status();
+        }
     }
     let _ = std::fs::remove_file(pid_file);
 }

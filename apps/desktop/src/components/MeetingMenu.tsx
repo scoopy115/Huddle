@@ -4,8 +4,8 @@ import { save } from "@tauri-apps/plugin-dialog";
 import { api, errorMessage } from "@/lib/api";
 import { native } from "@/lib/native";
 import { languageOptions } from "@/lib/languages";
-import { cn } from "@/lib/utils";
-import { AI_MISSING_HINT, useNav } from "@/lib/nav";
+import { cn, platformName } from "@/lib/utils";
+import { aiHint, useNav } from "@/lib/nav";
 import { Button, DangerDialog, Dialog, Select } from "@/components/ui";
 import { ProjectPicker } from "@/components/ProjectPicker";
 import type { MeetingMode } from "@/types/engine";
@@ -147,7 +147,7 @@ export function useMeetingActions({ onChanged, onDeleted }: { onChanged: (m: Men
 
       <DangerDialog open={dialog === "delete"} onClose={close} title="Delete this meeting?" confirmLabel="Delete meeting" seconds={0}
         onConfirm={async () => { await api.deleteMeeting(target.id); close(); onDeleted?.(target); onChanged(target); }}>
-        The recording, transcript, summary and action items of “{target.title}” will be permanently removed from this Mac.
+        The recording, transcript, summary and action items of “{target.title}” will be permanently removed from this {platformName}.
       </DangerDialog>
     </>
   );
@@ -172,7 +172,7 @@ export function MeetingMenuList({ onPick }: { onPick: (a: MeetingAction) => void
       <button className={ITEM} onClick={() => onPick("project")}><Folder className="h-3.5 w-3.5 text-muted" /> Move to project…</button>
       <button className={ITEM} onClick={() => onPick("language")}><Languages className="h-3.5 w-3.5 text-muted" /> Change spoken language…</button>
       <button className={ITEM} onClick={() => onPick("mode")}><MessageCircleQuestion className="h-3.5 w-3.5 text-muted" /> Notes style…</button>
-      <button className={cn(ITEM, !ai.ready && "cursor-not-allowed opacity-45 hover:bg-transparent")} disabled={!ai.ready} title={ai.ready ? undefined : AI_MISSING_HINT} onClick={() => onPick("summary")}><Sparkles className="h-3.5 w-3.5 text-muted" /> Regenerate summary</button>
+      <button className={cn(ITEM, !ai.ready && "cursor-not-allowed opacity-45 hover:bg-transparent")} disabled={!ai.ready} title={ai.ready ? undefined : aiHint(ai)} onClick={() => onPick("summary")}><Sparkles className="h-3.5 w-3.5 text-muted" /> Regenerate summary</button>
       <button className={ITEM} onClick={() => onPick("reprocess")}><RotateCw className="h-3.5 w-3.5 text-muted" /> Reprocess meeting…</button>
       <div className="my-1 border-t border-border" />
       <button className={cn(ITEM, "text-danger hover:bg-danger/10")} onClick={() => onPick("delete")}><Trash2 className="h-3.5 w-3.5" /> Delete meeting</button>

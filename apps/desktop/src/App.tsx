@@ -10,6 +10,7 @@ import { checkForUpdates, scheduleUpdateChecks } from "@/lib/updates";
 import { UpdateDialog } from "@/components/UpdateDialog";
 import { PermissionsReminder } from "@/components/PermissionsReminder";
 import { AI_MISSING_HINT, NavContext, defaultParent, type View } from "@/lib/nav";
+import { isMac } from "@/lib/utils";
 import type { Meeting, UserSettings } from "@/types/engine";
 import { Sidebar } from "@/components/Sidebar";
 import { CommandPalette } from "@/components/CommandPalette";
@@ -40,7 +41,7 @@ export default function App() {
   const [toast, setToast] = useState<string | null>(null);
   // AI availability: the llm resolution from the setup plan. Polled while missing so a download
   // finishing in Settings lights the features up without a restart.
-  const [ai, setAi] = useState<{ ready: boolean; reason: string | null }>({ ready: true, reason: null });
+  const [ai, setAi] = useState<{ ready: boolean; reason: string | null; unsupported: boolean }>({ ready: true, reason: null, unsupported: false });
   // The setup screen returns on every launch while a Whisper or AI model is missing; "Skip for
   // now" only hides it for the rest of this session.
   const [needsSetup, setNeedsSetup] = useState(false);
@@ -49,8 +50,9 @@ export default function App() {
     try {
       const plan = await api.setupPlan();
       const llm = plan.resolutions.find((r) => r.task === "llm");
-      setAi({ ready: llm?.status === "ready", reason: llm?.reason ?? null });
-      const ok = (s: string | undefined) => s === "ready" || s === "builtin";
+      setAi({ ready: llm?.status === "ready", reason: llm?.reason ?? null, unsupported: llm?.status === "unsupported" });
+      // "unsupported" (this computer cannot run an AI model) is settled: no setup screen for it.
+      const ok = (s: string | undefined) => s === "ready" || s === "builtin" || s === "unsupported";
       setNeedsSetup(plan.resolutions.some((r) => (r.task === "transcription" || r.task === "llm") && !ok(r.status)));
     } catch { /* engine not reachable yet */ }
   }, []);
@@ -109,7 +111,7 @@ export default function App() {
       case "import-audio": importAudio(); break;
       case "view-meetings": go({ kind: "meetings" }); break;
       case "view-projects": go({ kind: "projects" }); break;
-      case "view-ask": if (ai.ready) go({ kind: "ask" }); else setToast(AI_MISSING_HINT); break;
+      case "view-ask": if (ai.ready) go({ kind: "ask" }); else setToast(ai.unsupported && ai.reason ? ai.reason : AI_MISSING_HINT); break;
       case "view-actions": go({ kind: "actions" }); break;
       case "view-processes": go({ kind: "processes" }); break;
       case "view-search": setPalette((p) => !p); sounds.open(); break;
@@ -120,11 +122,26 @@ export default function App() {
         });
         break;
     }
-  }, [go, importAudio, ai.ready]);
+  }, [go, importAudio, ai.ready, ai.unsupported, ai.reason]);
   useEffect(() => {
     let un: (() => void) | undefined;
     native.onMenu(menuAction).then((u) => (un = u));
     return () => un?.();
+  }, [menuAction]);
+  // Windows and Linux have no application menu (it would be a classic menu bar), so the same
+  // shortcuts are handled here with Ctrl.
+  useEffect(() => {
+    if (isMac) return;
+    const ids: Record<string, string> = { n: "new-recording", o: "import-audio", "1": "view-meetings", "2": "view-projects", "3": "view-ask", "4": "view-actions", "5": "view-processes", k: "view-search", ",": "settings" };
+    const onKey = (e: KeyboardEvent) => {
+      if (!e.ctrlKey || e.altKey || e.metaKey || e.shiftKey) return;
+      const id = ids[e.key.toLowerCase()];
+      if (!id) return;
+      e.preventDefault();
+      menuAction(id);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
   }, [menuAction]);
 
   // Recordings started from the menu bar or ⌥⌘R: the shell records, the UI turns the result into

@@ -376,12 +376,17 @@ class DownloadCandidate(Schema):
     sha256: str | None = None
     recommended: bool = False
     description: str | None = None
-    min_memory_bytes: int | None = None   # UI greys the candidate out below this
+    min_memory_bytes: int | None = None   # system memory needed when the model runs on the CPU or unified memory
+    min_vram_bytes: int | None = None     # graphics memory needed on a PC with a dedicated card
+    # Whether this computer can run it (resolver.fit): ok | slow | no, with the reason for the UI.
+    fit: Literal["ok", "slow", "no"] = "ok"
+    fit_reason: str | None = None
 
 
 class Resolution(Schema):
     task: str
-    status: Literal["ready", "download_required", "builtin", "unavailable"]
+    # unsupported: this computer cannot run anything for the task (no download is offered).
+    status: Literal["ready", "download_required", "builtin", "unavailable", "unsupported"]
     model: LocalModel | None = None
     provider: str | None = None
     download: DownloadCandidate | None = None

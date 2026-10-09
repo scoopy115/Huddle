@@ -71,18 +71,35 @@ fn parse_version(tag: &str) -> Option<semver::Version> {
     semver::Version::parse(tag.trim().trim_start_matches(['v', 'V'])).ok()
 }
 
-/// The macOS disk image among the release assets: a `.dmg` whose name hints at macOS/Apple
-/// Silicon, otherwise the only/first `.dmg`. (Releases also carry a `.zip` for the updaters of
-/// 0.5.2–0.6.1; this version ignores it.)
+/// The installer for this OS among the release assets. macOS: a `.dmg` whose name hints at
+/// macOS/Apple Silicon, otherwise the only/first `.dmg` (releases also carry a `.zip` for the
+/// updaters of 0.5.2–0.6.1; ignored). Windows: the NSIS `-setup.exe` (or an `.msi`) whose name
+/// mentions Windows/x64.
 fn pick_asset(assets: &[Asset]) -> Option<&Asset> {
-    let zips: Vec<&Asset> = assets.iter().filter(|a| a.name.to_lowercase().ends_with(".dmg")).collect();
-    zips.iter()
+    let (exts, hints): (&[&str], &[&str]) = if cfg!(target_os = "windows") {
+        (&[".exe", ".msi"], &["windows", "win", "x64", "amd64", "setup"])
+    } else {
+        (&[".dmg"], &["mac", "darwin", "arm64", "aarch64", "apple"])
+    };
+    let mine: Vec<&Asset> = assets.iter().filter(|a| { let n = a.name.to_lowercase(); exts.iter().any(|e| n.ends_with(e)) }).collect();
+    mine.iter()
         .find(|a| {
             let n = a.name.to_lowercase();
-            ["mac", "darwin", "arm64", "aarch64", "apple"].iter().any(|k| n.contains(k))
+            hints.iter().any(|k| n.contains(k))
         })
-        .or(zips.first())
+        .or(mine.first())
         .copied()
+}
+
+/// The file name of this OS's installer for a version, when the release lists none.
+fn default_asset_name(version: &str) -> String {
+    let v = version.trim_start_matches('v');
+    if cfg!(target_os = "windows") { format!("Huddle-{v}-windows-x64-setup.exe") } else { format!("Huddle-{v}-macos-arm64.dmg") }
+}
+
+fn is_installer(name: &str) -> bool {
+    let n = name.to_lowercase();
+    if cfg!(target_os = "windows") { n.ends_with(".exe") || n.ends_with(".msi") } else { n.ends_with(".dmg") }
 }
 
 fn client(app: &AppHandle, timeout: Duration) -> Result<reqwest::Client, String> {
@@ -140,7 +157,8 @@ pub struct UpdateProgress {
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct InstallOutcome {
-    /// The downloaded disk image (`~/Downloads/Huddle-<version>-macos-arm64.dmg`), already opened.
+    /// The downloaded installer, already opened: the disk image on macOS
+    /// (`~/Downloads/Huddle-<version>-macos-arm64.dmg`), the setup program on Windows.
     pub dmg_path: String,
 }
 
@@ -154,24 +172,21 @@ fn running_bundle() -> Option<PathBuf> {
     exe.ancestors().find(|p| p.extension().is_some_and(|e| e == "app")).map(Path::to_path_buf)
 }
 
-async fn run(cmd: &str, args: &[&std::ffi::OsStr]) -> Result<(), String> {
-    let out = tokio::process::Command::new(cmd).args(args).output().await.map_err(|e| format!("{cmd}: {e}"))?;
-    if out.status.success() {
-        Ok(())
-    } else {
-        Err(format!("{cmd} failed: {}", String::from_utf8_lossy(&out.stderr).trim()))
-    }
+/// Open the installer with the OS: Finder mounts a disk image, Windows runs the setup program
+/// (it asks the UAC question itself).
+fn open_installer(path: &Path) -> Result<(), String> {
+    tauri_plugin_opener::open_path(path, None::<&str>).map_err(|e| format!("Could not open {}: {e}", path.display()))
 }
 
 #[tauri::command]
 pub async fn install_update(app: AppHandle, asset_url: String, asset_name: Option<String>, version: String) -> Result<InstallOutcome, String> {
-    if !cfg!(target_os = "macos") {
-        return Err("Automatic updates are only available on macOS.".into());
+    if !cfg!(any(target_os = "macos", target_os = "windows")) {
+        return Err("Automatic updates are only available on macOS and Windows.".into());
     }
     // Straight into Downloads, named after the version so several versions never collide.
-    let downloads = app.path().download_dir().unwrap_or_else(|_| std::env::var("HOME").map(|h| PathBuf::from(h).join("Downloads")).unwrap_or_else(|_| PathBuf::from("/tmp")));
+    let downloads = app.path().download_dir().unwrap_or_else(|_| std::env::temp_dir());
     std::fs::create_dir_all(&downloads).map_err(|e| format!("Could not create {}: {e}", downloads.display()))?;
-    let name = asset_name.filter(|n| n.to_lowercase().ends_with(".dmg")).unwrap_or_else(|| format!("Huddle-{}-macos-arm64.dmg", version.trim_start_matches('v')));
+    let name = asset_name.filter(|n| is_installer(n)).unwrap_or_else(|| default_asset_name(&version));
     let dmg = downloads.join(&name);
     let part = downloads.join(format!("{name}.part"));
 
@@ -202,18 +217,19 @@ pub async fn install_update(app: AppHandle, asset_url: String, asset_name: Optio
     let _ = std::fs::remove_file(&dmg);
     std::fs::rename(&part, &dmg).map_err(|e| format!("Could not save the download: {e}"))?;
 
-    // 2. Open it: Finder mounts the image and shows the drag-to-Applications window. The image is
-    //    signed and notarized, so no Gatekeeper prompt stands in the way.
+    // 2. Open it: Finder mounts the image and shows the drag-to-Applications window (the image is
+    //    signed and notarized, so no Gatekeeper prompt stands in the way); Windows starts the
+    //    setup program, which replaces the installed app and relaunches it.
     emit(&app, "opening", downloaded, total);
-    run("open", &[dmg.as_os_str()]).await?;
+    open_installer(&dmg)?;
     Ok(InstallOutcome { dmg_path: dmg.display().to_string() })
 }
 
-/// Re-open a downloaded disk image (the dialog's "Open again" after the user closed the window).
+/// Re-open a downloaded installer (the dialog's "Open again" after the user closed it).
 #[tauri::command]
 pub async fn open_download(path: String) -> Result<(), String> {
-    if !path.to_lowercase().ends_with(".dmg") {
-        return Err("Not a disk image.".into());
+    if !is_installer(&path) {
+        return Err("Not an installer.".into());
     }
-    run("open", &[std::ffi::OsStr::new(&path)]).await
+    open_installer(Path::new(&path))
 }

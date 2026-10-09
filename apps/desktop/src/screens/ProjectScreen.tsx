@@ -3,7 +3,7 @@ import { ArrowLeft, Check, CheckSquare, Folder, MessageSquareText, Mic, MoreHori
 import { api, errorMessage } from "@/lib/api";
 import type { AskResult, Meeting, ProjectDetail } from "@/types/engine";
 import { fmtRelativeDay, fmtTime } from "@/lib/format";
-import { AI_MISSING_HINT, useNav } from "@/lib/nav";
+import { aiHint, useNav } from "@/lib/nav";
 import { cn, speakerColor } from "@/lib/utils";
 import { Button, DangerDialog, Dialog, Input, SectionTitle, Spinner } from "@/components/ui";
 import { MeetingContextMenu, useMeetingActions } from "@/components/MeetingMenu";
@@ -96,8 +96,8 @@ export function ProjectScreen({ id, onChanged }: { id: string; onChanged: () => 
             <section className="mb-6">
               <SectionTitle>Ask this project</SectionTitle>
               <div className="flex gap-2">
-                <Input placeholder={ai.ready ? "What is still open for this project?" : AI_MISSING_HINT} value={ask} onChange={(e) => setAsk(e.target.value)} onKeyDown={(e) => e.key === "Enter" && ai.ready && doAsk()} disabled={!ai.ready} />
-                <Button variant="primary" loading={asking} onClick={doAsk} disabled={!ai.ready} title={ai.ready ? undefined : AI_MISSING_HINT}><MessageSquareText className="h-3.5 w-3.5" /> Ask</Button>
+                <Input placeholder={ai.ready ? "What is still open for this project?" : aiHint(ai)} value={ask} onChange={(e) => setAsk(e.target.value)} onKeyDown={(e) => e.key === "Enter" && ai.ready && doAsk()} disabled={!ai.ready} />
+                <Button variant="primary" loading={asking} onClick={doAsk} disabled={!ai.ready} title={ai.ready ? undefined : aiHint(ai)}><MessageSquareText className="h-3.5 w-3.5" /> Ask</Button>
               </div>
               {askResult && (
                 <div className="selectable mt-3 panel p-3">

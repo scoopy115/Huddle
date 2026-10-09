@@ -1,5 +1,6 @@
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { native } from "@/lib/native";
+import { isMac } from "@/lib/utils";
 import { fmtBytes } from "@/lib/format";
 import { dismissUpdate, installUpdate, useUpdates } from "@/lib/updates";
 import { Button, Dialog, Spinner } from "@/components/ui";
@@ -37,7 +38,10 @@ export function UpdateDialog() {
       )}>
       {done ? (
         <p className="text-muted">
-          A window with the new version has opened. Quit Huddle, then drag Huddle into the Applications folder there, replacing the old one, and open it again. The disk image is in your Downloads folder as <span className="font-mono text-[12px] text-fg/80">{done.dmgPath.split("/").pop()}</span>.
+          {isMac
+            ? "A window with the new version has opened. Quit Huddle, then drag Huddle into the Applications folder there, replacing the old one, and open it again. The disk image is in your Downloads folder as "
+            : "The installer has opened. Follow its steps; it replaces this version and starts Huddle again. The installer is in your Downloads folder as "}
+          <span className="font-mono text-[12px] text-fg/80">{done.dmgPath.split(/[\\/]/).pop()}</span>.
         </p>
       ) : (
         <p className="text-muted">

@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 import time
 from pathlib import Path
 
@@ -24,8 +23,7 @@ def _models_dir() -> Path:
 
 
 def installed() -> bool:
-    return (_models_dir().exists() or shutil.which("ollama") is not None
-            or Path("/Applications/Ollama.app").exists() or ollama_runtime.binary() is not None)
+    return _models_dir().exists() or ollama_runtime.binary() is not None or Path("/Applications/Ollama.app").exists()
 
 
 def _api_models() -> tuple[list[dict], str] | None:

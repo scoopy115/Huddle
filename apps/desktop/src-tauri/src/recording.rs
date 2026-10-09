@@ -74,17 +74,20 @@ enum WriterMsg {
 }
 
 /// One captured stream: cpal stream + writer thread.
-struct Capture {
+pub(crate) struct Capture {
     _stream: cpal::Stream,
     tx: Sender<WriterMsg>,
     writer: Option<JoinHandle<Result<u64, String>>>,
     sample_rate: u32,
 }
 
+// cpal::Stream is !Send on some platforms; captures only move between Tauri commands.
+unsafe impl Send for Capture {}
+
 /// Pause bookkeeping shared with the audio callback: while `paused`, samples are dropped (the
 /// stream stays open so resuming is instant and the microphone indicator stays on) and the
 /// elapsed time stands still.
-struct Pause {
+pub(crate) struct Pause {
     paused: AtomicBool,
     /// Total paused time in milliseconds, from finished pauses.
     total_ms: AtomicU64,
@@ -92,10 +95,10 @@ struct Pause {
 }
 
 impl Pause {
-    fn new() -> Arc<Self> {
+    pub(crate) fn new() -> Arc<Self> {
         Arc::new(Pause { paused: AtomicBool::new(false), total_ms: AtomicU64::new(0), since: Mutex::new(None) })
     }
-    fn is_paused(&self) -> bool {
+    pub(crate) fn is_paused(&self) -> bool {
         self.paused.load(Ordering::Relaxed)
     }
     /// Recorded time so far, given the wall-clock start.
@@ -104,7 +107,7 @@ impl Pause {
         let paused = Duration::from_millis(self.total_ms.load(Ordering::Relaxed)) + current;
         started.elapsed().saturating_sub(paused).as_secs_f64()
     }
-    fn pause(&self) {
+    pub(crate) fn pause(&self) {
         if let Ok(mut g) = self.since.lock() {
             if g.is_none() {
                 *g = Some(Instant::now());
@@ -112,7 +115,7 @@ impl Pause {
         }
         self.paused.store(true, Ordering::Relaxed);
     }
-    fn resume(&self) {
+    pub(crate) fn resume(&self) {
         self.paused.store(false, Ordering::Relaxed);
         if let Ok(mut g) = self.since.lock() {
             if let Some(t) = g.take() {
@@ -297,7 +300,7 @@ fn input_config(device: &cpal::Device, name: Option<&str>) -> Result<cpal::Suppo
     }
 }
 
-fn start_capture(
+pub(crate) fn start_capture(
     device: &cpal::Device,
     config: cpal::SupportedStreamConfig,
     path: PathBuf,
@@ -375,7 +378,7 @@ fn start_capture(
     Ok(Capture { _stream: stream, tx, writer: Some(writer), sample_rate })
 }
 
-fn finish_capture(mut c: Capture) -> Result<u64, String> {
+pub(crate) fn finish_capture(mut c: Capture) -> Result<u64, String> {
     // Pause explicitly before dropping so CoreAudio releases the microphone right away
     // (the orange indicator otherwise lingers until the audio unit is torn down).
     let _ = c._stream.pause();

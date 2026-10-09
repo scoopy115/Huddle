@@ -129,7 +129,7 @@ def _404(what: str = "Meeting"):
 
 def _resolver() -> ResolverContext:
     c = ctx()
-    return ResolverContext(registry=c.registry, settings=c.settings(), memory_bytes=c.hardware.get("memoryBytes"))
+    return ResolverContext(registry=c.registry, settings=c.settings(), memory_bytes=c.hardware.get("memoryBytes"), hardware=c.hardware)
 
 
 # ---- health / system ---------------------------------------------------------- #

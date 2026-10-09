@@ -59,7 +59,7 @@ export function MeetingsScreen({ meetings, loading, onImport, onChanged }: { mee
           <EmptyState
             icon={<Mic className="h-6 w-6" />}
             title="No meetings yet"
-            body="Put your Mac on the table, press New Recording, and Huddle will transcribe and summarise the conversation."
+            body="Put your laptop on the table, press New Recording, and Huddle will transcribe and summarise the conversation."
             action={<Button variant="record" onClick={() => go({ kind: "record" })}><Mic className="h-4 w-4" /> New Recording</Button>}
           />
         ) : !list.length ? (

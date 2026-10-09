@@ -27,7 +27,7 @@ WHISPER_CANDIDATES: list[DownloadCandidate] = [
                       source="huggingface", url="mlx-community/whisper-large-v3-turbo", license="MIT",
                       recommended=True),
     DownloadCandidate(id="whisper:large-v3-turbo", name="Whisper large-v3-turbo (CPU)", task="transcription",
-                      purpose="Transcription on the CPU — works on any Mac and on Windows", size_bytes=1_620_000_000,
+                      purpose="Transcription on the CPU — works on every computer", size_bytes=1_620_000_000,
                       source="huggingface", url="mobiuslabsgmbh/faster-whisper-large-v3-turbo", license="MIT"),
     DownloadCandidate(id="whisper:large-v3", name="Whisper large-v3", task="transcription",
                       purpose="Transcription — highest accuracy, about 2× slower", size_bytes=3_090_000_000,
@@ -36,7 +36,7 @@ WHISPER_CANDIDATES: list[DownloadCandidate] = [
                       purpose="Transcription — faster, less accurate in languages other than English", size_bytes=1_530_000_000,
                       source="huggingface", url="Systran/faster-whisper-medium", license="MIT"),
     DownloadCandidate(id="whisper:small", name="Whisper small", task="transcription",
-                      purpose="Transcription — fastest, for older or low-memory Macs", size_bytes=484_000_000,
+                      purpose="Transcription — fastest, for older or low-memory computers", size_bytes=484_000_000,
                       source="huggingface", url="Systran/faster-whisper-small", license="MIT"),
     # A second family next to Whisper. Never the automatic pick: chosen by hand under Settings → Models.
     DownloadCandidate(id="parakeet:mlx-tdt-0.6b-v3", name="Parakeet TDT 0.6B v3 (Apple Silicon)", task="transcription",
@@ -50,12 +50,19 @@ WHISPER_CANDIDATES: list[DownloadCandidate] = [
 # meetings on 16 GB+ Macs and greyed out below that.
 LLM_CANDIDATES: list[DownloadCandidate] = [
     DownloadCandidate(id="ollama:qwen3.5:4b", name="Qwen3.5 4B", task="llm",
-                      purpose="Meeting summaries — fits Macs with 8 GB or more", size_bytes=3_400_000_000,
-                      source="ollama", url="qwen3.5:4b", license="Apache-2.0", recommended=True),
+                      purpose="Meeting summaries — 8 GB of unified memory or a graphics card with 6 GB", size_bytes=3_400_000_000,
+                      source="ollama", url="qwen3.5:4b", license="Apache-2.0", recommended=True,
+                      min_memory_bytes=8 * GB, min_vram_bytes=6 * GB),
     DownloadCandidate(id="ollama:qwen3.5:9b", name="Qwen3.5 9B", task="llm",
-                      purpose="Meeting summaries — fits Macs with 16 GB or more", size_bytes=6_600_000_000,
-                      source="ollama", url="qwen3.5:9b", license="Apache-2.0", min_memory_bytes=16 * GB),
+                      purpose="Meeting summaries — 16 GB of unified memory or a graphics card with 12 GB", size_bytes=6_600_000_000,
+                      source="ollama", url="qwen3.5:9b", license="Apache-2.0", min_memory_bytes=16 * GB, min_vram_bytes=12 * GB),
 ]
+
+# System memory a CPU-only PC needs to run an AI model at all (Ollama keeps the whole model plus
+# the context in RAM, next to Whisper and the app): twice the unified-memory floor.
+CPU_LLM_MEMORY = {"ollama:qwen3.5:4b": 16 * GB, "ollama:qwen3.5:9b": 32 * GB}
+# CPU Whisper (CTranslate2 int8) memory floors; large-v3 keeps ~3 GB of weights resident.
+WHISPER_MEMORY = {"whisper:large-v3": 12 * GB, "whisper:small": 4 * GB}
 
 GOOD_LLM_FAMILIES = ("qwen3.5", "qwen35", "qwen3", "qwen2.5", "llama-3.3", "llama-3.2", "llama-3.1", "llama3", "llama",
                      "gemma-3", "gemma3", "gemma", "mistral", "mixtral", "phi-4", "phi", "gpt-oss", "hermes",
@@ -114,6 +121,47 @@ class ResolverContext:
     registry: Registry
     settings: dict[str, Any]
     memory_bytes: int | None = None
+    # providers.compute.hardware_info(); None means "unknown machine" (fits are not judged).
+    hardware: dict[str, Any] | None = None
+
+
+def _gb(n: int | None) -> str:
+    return f"{round((n or 0) / GB)} GB"
+
+
+def fit(c: DownloadCandidate, hw: dict[str, Any] | None) -> tuple[str, str | None]:
+    """Can this computer run the candidate: ("ok" | "slow" | "no", reason). Three machine shapes
+    (see providers/compute.py): unified memory (Apple Silicon) judges by system memory, a PC with
+    a dedicated card judges the AI model by graphics memory, a CPU-only PC needs twice the memory
+    and is always slow for AI models."""
+    if not hw:
+        return "ok", None
+    mem = hw.get("memoryBytes") or 0
+    unified = bool(hw.get("unifiedMemory"))
+    acc = hw.get("acceleratorBytes")
+    if c.task == "llm":
+        if unified:
+            if c.min_memory_bytes and mem and mem < c.min_memory_bytes:
+                return "no", f"Needs {_gb(c.min_memory_bytes)} of memory; this Mac has {_gb(mem)}."
+            return "ok", None
+        cpu_floor = CPU_LLM_MEMORY.get(c.id, (c.min_memory_bytes or 8 * GB) * 2)
+        if acc:
+            if not c.min_vram_bytes or acc >= c.min_vram_bytes:
+                return "ok", None
+            if mem >= cpu_floor:
+                return "slow", f"Does not fit in the graphics card's {_gb(acc)}; runs on the CPU, slowly."
+            return "no", f"Needs a graphics card with {_gb(c.min_vram_bytes)}; this one has {_gb(acc)}."
+        if mem >= cpu_floor:
+            return "slow", "No usable graphics card: runs on the CPU, slowly."
+        return "no", f"Needs {_gb(cpu_floor)} of memory or a graphics card with {_gb(c.min_vram_bytes)}."
+    if c.task == "transcription":
+        floor = WHISPER_MEMORY.get(c.id, 8 * GB)
+        if mem and mem < floor:
+            return "no", f"Needs {_gb(floor)} of memory; this computer has {_gb(mem)}."
+        if not unified and c.id == "whisper:large-v3":
+            return "slow", "Runs on the CPU: about twice as slow as large-v3-turbo."
+        return "ok", None
+    return "ok", None
 
 
 def _whisper_download(ctx: ResolverContext) -> DownloadCandidate:
@@ -121,6 +169,8 @@ def _whisper_download(ctx: ResolverContext) -> DownloadCandidate:
     mem = ctx.memory_bytes or 0
     if mlx_available():
         return next(c for c in WHISPER_CANDIDATES if c.id == "whisper:mlx-large-v3-turbo")
+    if mem and mem < 8 * GB:
+        return next(c for c in WHISPER_CANDIDATES if c.id == "whisper:small")
     if mem and mem < 12 * GB:
         return next(c for c in WHISPER_CANDIDATES if c.id == "whisper:medium")
     return next(c for c in WHISPER_CANDIDATES if c.id == "whisper:large-v3-turbo")
@@ -137,14 +187,21 @@ def _llm_download(ctx: ResolverContext) -> DownloadCandidate:
 
 
 def candidates_for(ctx: ResolverContext) -> list[DownloadCandidate]:
-    """Marketplace list with the Recommended flag set for *this* machine: the MLX Whisper only
-    where MLX runs, the CPU build elsewhere. AI models keep their fixed recommendation (4B);
-    `min_memory_bytes` lets the UI grey out what this Mac cannot run well."""
+    """Marketplace list for *this* machine: Apple-Silicon-only builds (MLX) appear only where MLX
+    runs; every row carries `fit`/`fit_reason` so the UI can grey out what this computer cannot
+    run, and Recommended marks the automatic picks."""
+    from .providers.parakeet import parakeet_available
+    from .providers.transcription import mlx_available
     whisper_pick = _whisper_download(ctx).id
     llm_pick = _llm_download(ctx).id
     out: list[DownloadCandidate] = []
     for c in WHISPER_CANDIDATES + LLM_CANDIDATES:
-        out.append(c.model_copy(update={"recommended": c.id in (whisper_pick, llm_pick)}))
+        if c.id.startswith("whisper:mlx-") and not mlx_available():
+            continue
+        if c.id.startswith("parakeet:mlx-") and not parakeet_available():
+            continue
+        f, reason = fit(c, ctx.hardware)
+        out.append(c.model_copy(update={"recommended": c.id in (whisper_pick, llm_pick) and f != "no", "fit": f, "fit_reason": reason}))
     return out
 
 
@@ -227,10 +284,15 @@ def _auto_llm(ctx: ResolverContext) -> Resolution:
         reason = "Found in Ollama" + ("" if ollama_state == "available" else " (Ollama is not running)")
         return Resolution(task="llm", status="ready" if ollama_state == "available" else "unavailable", model=best,
                           provider="ollama", reason=reason, auto_model=best)
+    cand = _llm_download(ctx)
+    f, why = fit(cand, ctx.hardware)
+    if f == "no":
+        return Resolution(task="llm", status="unsupported", provider="ollama",
+                          reason=why or "This computer cannot run a local AI model.")
     if ollama_state in ("not_found", "installed_not_running"):
-        return Resolution(task="llm", status="download_required", provider="ollama", download=_llm_download(ctx),
+        return Resolution(task="llm", status="download_required", provider="ollama", download=cand,
                           reason="Huddle installs a small local AI runtime together with this model.")
-    return Resolution(task="llm", status="download_required", provider="ollama", download=_llm_download(ctx),
+    return Resolution(task="llm", status="download_required", provider="ollama", download=cand,
                       reason="No suitable AI model yet")
 
 

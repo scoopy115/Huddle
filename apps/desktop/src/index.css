@@ -224,3 +224,7 @@ input[type="number"] {
 
 /* Menu-bar popover: the window is transparent, the panel draws its own shape. */
 html.tray, html.tray body, html.tray #root { background: transparent; overflow: hidden; }
+
+/* macOS overlays the traffic lights on the page, so a spacer keeps content clear of them.
+   Windows and Linux draw a native title bar above the page: no spacer. */
+html[data-os="windows"] .titlebar-space, html[data-os="linux"] .titlebar-space { height: 0; }

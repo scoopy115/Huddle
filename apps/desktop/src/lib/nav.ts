@@ -13,9 +13,12 @@ export type View =
   | { kind: "settings"; section?: string }
   | { kind: "onboarding" };
 
-/** Whether summaries, Ask, Refine and action-item extraction can run (an AI model is resolved). */
-export interface AiState { ready: boolean; reason: string | null; refresh: () => void }
+/** Whether summaries, Ask, Refine and action-item extraction can run (an AI model is resolved).
+ *  `unsupported`: this computer cannot run one at all (`reason` says why). */
+export interface AiState { ready: boolean; reason: string | null; unsupported?: boolean; refresh: () => void }
 export const AI_MISSING_HINT = "Needs an AI model — download one under Settings → Models.";
+/** The hint for disabled AI controls: the download hint, or why this computer cannot run a model. */
+export const aiHint = (ai: Pick<AiState, "reason" | "unsupported">) => (ai.unsupported && ai.reason ? `Needs an AI model. ${ai.reason}` : AI_MISSING_HINT);
 
 /** Where a back button lands with nothing on the history stack (a deep link, or the first screen). */
 export function defaultParent(view: View): View {

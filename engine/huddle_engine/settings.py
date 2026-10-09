@@ -13,6 +13,7 @@ Two layers:
 from __future__ import annotations
 
 import os
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -26,7 +27,7 @@ def _default_data_dir() -> Path:
     if os.name == "nt":
         base = Path(os.getenv("APPDATA", home / "AppData" / "Roaming"))
         return base / "com.huddle.desktop"
-    if os.uname().sysname == "Darwin":
+    if sys.platform == "darwin":
         return home / "Library" / "Application Support" / "com.huddle.desktop"
     return Path(os.getenv("XDG_DATA_HOME", home / ".local" / "share")) / "com.huddle.desktop"
 

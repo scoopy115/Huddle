@@ -2,7 +2,7 @@ import { Activity, ArrowUpCircle, CheckSquare, Folder, MessageSquareText, Mic, S
 import { cn, modKey } from "@/lib/utils";
 import { sounds } from "@/lib/sounds";
 import { showUpdatePrompt, useUpdates } from "@/lib/updates";
-import { AI_MISSING_HINT, useNav, type View } from "@/lib/nav";
+import { aiHint, useNav, type View } from "@/lib/nav";
 import type { EngineStatus } from "@/lib/native";
 import logo from "@/assets/huddle-logo.svg";
 
@@ -50,14 +50,14 @@ export function Sidebar({ engine, openActions, recording, paused, running }: { e
     <aside className="relative flex h-full w-[224px] shrink-0 flex-col border-r border-border bg-sidebar">
       {/* Soft red wash behind the wordmark */}
       <div className="pointer-events-none absolute inset-x-0 top-0 h-40 bg-[radial-gradient(70%_60%_at_30%_0%,rgb(var(--accent)/0.12),transparent_70%)]" />
-      <div data-tauri-drag-region className="titlebar-drag relative h-[38px] shrink-0" />
+      <div data-tauri-drag-region className="titlebar-drag titlebar-space relative h-[38px] shrink-0" />
       <div data-tauri-drag-region className="titlebar-drag relative flex items-center justify-center px-4 pb-8 pt-2">
         <img data-tauri-drag-region src={logo} alt="Huddle" className="h-9 w-auto select-none" draggable={false} />
       </div>
       <nav className="relative flex flex-col gap-0.5 px-3">
         <NavItem icon={Mic} label="Meetings" active={is("meetings")} onClick={() => go({ kind: "meetings" })} hint={`${modKey}1`} />
         <NavItem icon={Folder} label="Projects" active={is("projects")} onClick={() => go({ kind: "projects" })} hint={`${modKey}2`} />
-        <NavItem icon={MessageSquareText} label="Ask" active={is("ask")} onClick={() => go({ kind: "ask" })} hint={`${modKey}3`} disabled={!ai.ready} title={ai.ready ? undefined : AI_MISSING_HINT} />
+        <NavItem icon={MessageSquareText} label="Ask" active={is("ask")} onClick={() => go({ kind: "ask" })} hint={`${modKey}3`} disabled={!ai.ready} title={ai.ready ? undefined : aiHint(ai)} />
         <NavItem icon={CheckSquare} label="Action Items" active={is("actions")} onClick={() => go({ kind: "actions" })} count={openActions} hint={`${modKey}4`} />
         <NavItem icon={Activity} label="Processes" active={is("processes")} onClick={() => go({ kind: "processes" })} count={running} hint={`${modKey}5`} />
         <NavItem icon={Search} label="Search" active={is("search")} onClick={() => go({ kind: "search" })} hint={`${modKey}K`} />
