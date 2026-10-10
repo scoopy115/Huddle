@@ -70,7 +70,7 @@ function inline(text: string): ReactNode[] {
     if (m[1]) out.push(<code key={k++} className="rounded bg-fg/[0.06] px-1 font-mono text-[11.5px]">{s.slice(1, -1)}</code>);
     else if (m[2]) out.push(<b key={k++}>{inline(s.slice(2, -2))}</b>);
     else if (m[3]) out.push(<i key={k++}>{inline(s.slice(1, -1))}</i>);
-    else if (m[4]) { const label = s.slice(1, s.indexOf("]")); out.push(<a key={k++} href={m[5]} className="text-accent hover:underline" onClick={(e) => { e.preventDefault(); openUrl(m![5]!); }}>{label}</a>); }
+    else if (m[4]) { const label = s.slice(1, s.indexOf("]")), url = m[5]!; out.push(<a key={k++} href={url} className="text-accent hover:underline" onClick={(e) => { e.preventDefault(); openUrl(url); }}>{label}</a>); }
     else if (m[6]) out.push(<a key={k++} href={s} className="text-accent hover:underline" onClick={(e) => { e.preventDefault(); openUrl(s); }}>{s}</a>);
     last = m.index + s.length;
   }
