@@ -8,6 +8,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
 import re
 import socket
 import ssl
@@ -21,6 +22,10 @@ import httpx
 
 from . import __version__
 from .settings import EngineConfig
+
+# What the server records as the client's version: the desktop app's version when the shell
+# passes it (HUDDLE_APP_VERSION), the engine's own otherwise (headless use, Huddle Server itself).
+CLIENT_VERSION = os.getenv("HUDDLE_APP_VERSION") or __version__
 
 log = logging.getLogger(__name__)
 
@@ -84,7 +89,7 @@ def _verify(sc: ServerConfig):
 
 def _client(sc: ServerConfig, timeout: Any) -> httpx.Client:
     headers = {"Authorization": f"Bearer {sc.api_key}", "User-Agent": f"huddle-engine/{__version__}",
-               "X-Huddle-Client-Version": __version__}
+               "X-Huddle-Client-Version": CLIENT_VERSION}
     if _transport_override is not None:
         return httpx.Client(base_url=sc.url, headers=headers, timeout=timeout, transport=_transport_override)
     return httpx.Client(base_url=sc.url, headers=headers, timeout=timeout, verify=_verify(sc))

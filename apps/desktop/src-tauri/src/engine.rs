@@ -209,6 +209,8 @@ async fn spawn(app: &AppHandle, data_dir: PathBuf) -> anyhow::Result<()> {
         .env("HUDDLE_TOKEN", &tok)
         .env("HUDDLE_PARENT_PID", std::process::id().to_string())
         .env("HUDDLE_SYSTEM_LANGUAGE", crate::system_audio::system_language())
+        // the app's version, which a Huddle Server shows for this client (the engine has its own)
+        .env("HUDDLE_APP_VERSION", app.package_info().version.to_string())
         // models shipped inside the app bundle (speaker separation); the engine uses them in place
         .env("HUDDLE_BUNDLED_MODELS", app.path().resource_dir().map(|d| d.join("models")).map(|d| d.display().to_string()).unwrap_or_default())
         .env("PYTHONUNBUFFERED", "1")
