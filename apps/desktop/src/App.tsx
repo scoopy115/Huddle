@@ -32,6 +32,15 @@ import { SettingsScreen } from "@/screens/SettingsScreen";
 
 export default function App() {
   const [view, setView] = useState<View>({ kind: "meetings" });
+  // The Settings screen keeps its own copy; reload ours when leaving it, so a connected or
+  // disconnected server changes "Process where?" right away.
+  const wasInSettings = useRef(false);
+  useEffect(() => {
+    if (view.kind === "settings") { wasInSettings.current = true; return; }
+    if (!wasInSettings.current) return;
+    wasInSettings.current = false;
+    api.getSettings().then(setSettings).catch(() => {});
+  }, [view.kind]);
   const [engine, setEngine] = useState<EngineStatus>({ state: "starting", port: null, message: null, command: null, logPath: null });
   const [meetings, setMeetings] = useState<Meeting[] | null>(null);
   const [loading, setLoading] = useState(false);
