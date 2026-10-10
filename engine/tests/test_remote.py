@@ -190,3 +190,41 @@ def test_runner_enqueue_uses_remote_pipeline(db, cfg):
 def test_normalize_and_fingerprint():
     assert server_client.normalize_url("huddle.local:8443/") == "https://huddle.local:8443"
     assert server_client.format_fingerprint("ab:cd ef") == "AB:CD:EF"
+
+
+def _sc():
+    return server_client.ServerConfig(url="https://huddle.example.test", api_key="hsk_test")
+
+
+def _with(monkeypatch, handler):
+    monkeypatch.setattr(server_client, "_transport_override", httpx.MockTransport(handler))
+
+
+def test_proxy_login_redirect_is_a_clear_error(monkeypatch):
+    """A tunnel with its own sign-in (Pangolin, Cloudflare Access) answers 302 to its login page
+    before the server sees the key; this used to crash on reading an empty body as JSON (500)."""
+    _with(monkeypatch, lambda r: httpx.Response(302, headers={"location": "https://pangolin.example.test/auth/resource/1?redirect=x"}))
+    with pytest.raises(server_client.ServerError) as ei:
+        server_client.ping(_sc())
+    assert "pangolin.example.test" in str(ei.value) and "/v1" in str(ei.value)
+
+
+def test_html_answer_is_not_a_server(monkeypatch):
+    _with(monkeypatch, lambda r: httpx.Response(200, headers={"content-type": "text/html"}, text="<html>dashboard</html>"))
+    with pytest.raises(server_client.ServerError) as ei:
+        server_client.ping(_sc())
+    assert "No Huddle Server" in str(ei.value) and "text/html" in str(ei.value)
+
+
+def test_json_without_server_fields_is_not_a_server(monkeypatch):
+    _with(monkeypatch, lambda r: httpx.Response(200, json={"ok": True}))
+    with pytest.raises(server_client.ServerError) as ei:
+        server_client.ping(_sc())
+    assert "not as a Huddle Server" in str(ei.value)
+
+
+def test_plain_text_unauthorized_from_a_proxy(monkeypatch):
+    _with(monkeypatch, lambda r: httpx.Response(401, headers={"content-type": "text/plain"}, text="Unauthorized"))
+    with pytest.raises(server_client.ServerError) as ei:
+        server_client.ping(_sc())
+    assert "client key" in str(ei.value)

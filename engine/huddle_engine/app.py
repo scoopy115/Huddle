@@ -254,6 +254,9 @@ def server_test():
         return ServerTestResult(ok=False, error=str(e), untrusted_certificate={"fingerprint": e.fingerprint, "subject": e.subject})
     except server_client.ServerError as e:
         return ServerTestResult(ok=False, error=str(e) + (f" ({e.detail[:200]})" if e.detail else ""))
+    except Exception as e:  # never a bare 500 for the user: the dialog shows what happened
+        log.exception("server test failed")
+        return ServerTestResult(ok=False, error=f"The test failed: {e}")
     c.update_settings({"server.name": str(info.get("name") or sc.host)})
     return ServerTestResult(ok=True, server=info)
 

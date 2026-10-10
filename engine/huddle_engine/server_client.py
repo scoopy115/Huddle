@@ -91,6 +91,14 @@ def _client(sc: ServerConfig, timeout: Any) -> httpx.Client:
 
 
 def _raise_for(r: httpx.Response) -> None:
+    if 300 <= r.status_code < 400:
+        # A redirect to a login page: a proxy with its own sign-in (Pangolin, Cloudflare Access,
+        # Authelia, …) sits in front of the server and answers before Huddle Server sees the key.
+        target = urlparse(r.headers.get("location", ""))
+        where = target.hostname or r.headers.get("location", "") or "another address"
+        raise ServerError(f"The address redirects to {where}: a proxy with its own sign-in sits in front of the server. "
+                          "Let /v1 and /mcp through without that sign-in (Huddle's client key protects them), or use the server's direct address.",
+                          f"HTTP {r.status_code} → {r.headers.get('location', '')}")
     if r.status_code < 400:
         return
     try:
@@ -102,6 +110,20 @@ def _raise_for(r: httpx.Response) -> None:
     if r.status_code == 404:
         raise ServerError("The server no longer has this recording.", detail)
     raise ServerError(f"The server answered {r.status_code}.", str(detail)[:2000])
+
+
+def _json(r: httpx.Response) -> Any:
+    """The JSON body of a successful answer; anything else (an HTML page from a proxy or the
+    dashboard, an empty body) means no Huddle Server answered at this address."""
+    ctype = r.headers.get("content-type", "").split(";")[0].strip().lower()
+    if ctype != "application/json":
+        raise ServerError(f"No Huddle Server answered at this address (it sent {ctype or 'no content type'}). "
+                          "Check the address; the server's own page shows what clients should use.",
+                          r.text[:500])
+    try:
+        return r.json()
+    except ValueError as e:
+        raise ServerError("The server sent an answer Huddle could not read.", r.text[:500]) from e
 
 
 def _wrap(fn: Callable[[], Any], sc: ServerConfig) -> Any:
@@ -166,7 +188,10 @@ def ping(sc: ServerConfig) -> dict[str, Any]:
         with _client(sc, PING_TIMEOUT) as c:
             r = c.get("/v1/ping")
             _raise_for(r)
-            return r.json()
+            info = _json(r)
+            if not isinstance(info, dict) or "version" not in info or "name" not in info:
+                raise ServerError("This address answers, but not as a Huddle Server.", str(info)[:500])
+            return info
     return _wrap(go, sc)
 
 
@@ -198,7 +223,7 @@ def upload(sc: ServerConfig, recording_id: str, audio: Path, meta: dict[str, Any
                 r = c.post("/v1/recordings", data={"meta": json.dumps(meta)},
                            files={"audio": (audio.name, pf, "audio/flac" if audio.suffix == ".flac" else "audio/wav")})
                 _raise_for(r)
-                return r.json()
+                return _json(r)
         finally:
             pf.close()
     return _wrap(go, sc)
@@ -209,7 +234,7 @@ def status(sc: ServerConfig, recording_id: str) -> dict[str, Any]:
         with _client(sc, PING_TIMEOUT) as c:
             r = c.get(f"/v1/recordings/{recording_id}")
             _raise_for(r)
-            return r.json()
+            return _json(r)
     return _wrap(go, sc)
 
 
@@ -218,7 +243,7 @@ def result(sc: ServerConfig, recording_id: str) -> dict[str, Any]:
         with _client(sc, httpx.Timeout(60.0)) as c:
             r = c.get(f"/v1/recordings/{recording_id}/result")
             _raise_for(r)
-            return r.json()
+            return _json(r)
     return _wrap(go, sc)
 
 
@@ -227,7 +252,7 @@ def retry(sc: ServerConfig, recording_id: str) -> dict[str, Any]:
         with _client(sc, PING_TIMEOUT) as c:
             r = c.post(f"/v1/recordings/{recording_id}/process")
             _raise_for(r)
-            return r.json()
+            return _json(r)
     return _wrap(go, sc)
 
 
