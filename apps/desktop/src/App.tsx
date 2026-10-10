@@ -42,16 +42,16 @@ export default function App() {
   const [toast, setToast] = useState<string | null>(null);
   // AI availability: the llm resolution from the setup plan. Polled while missing so a download
   // finishing in Settings lights the features up without a restart.
-  const [ai, setAi] = useState<{ ready: boolean; reason: string | null; unsupported: boolean }>({ ready: true, reason: null, unsupported: false });
+  const [ai, setAi] = useState<{ ready: boolean; reason: string | null; unsupported: boolean; notesEnabled: boolean }>({ ready: true, reason: null, unsupported: false, notesEnabled: true });
   // The setup screen returns on every launch while a Whisper or AI model is missing; "Skip for
   // now" only hides it for the rest of this session.
   const [needsSetup, setNeedsSetup] = useState(false);
   const [setupDismissed, setSetupDismissed] = useState(false);
   const refreshAi = useCallback(async () => {
     try {
-      const plan = await api.setupPlan();
+      const [plan, s] = await Promise.all([api.setupPlan(), api.getSettings()]);
       const llm = plan.resolutions.find((r) => r.task === "llm");
-      setAi({ ready: llm?.status === "ready", reason: llm?.reason ?? null, unsupported: llm?.status === "unsupported" });
+      setAi({ ready: llm?.status === "ready", reason: llm?.reason ?? null, unsupported: llm?.status === "unsupported", notesEnabled: s["notes.enabled"] !== false });
       // "unsupported" (this computer cannot run an AI model) is settled: no setup screen for it.
       const ok = (s: string | undefined) => s === "ready" || s === "builtin" || s === "unsupported";
       // Only the transcription model brings the setup screen back: without it nothing works. A

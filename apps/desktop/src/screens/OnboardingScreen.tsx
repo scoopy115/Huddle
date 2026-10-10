@@ -1,22 +1,24 @@
 import { useEffect, useState } from "react";
-import { Check, Circle, Download, Loader2, XCircle } from "lucide-react";
+import { Check, Circle, Download, Languages, Loader2, XCircle } from "lucide-react";
 import { api, errorMessage } from "@/lib/api";
 import type { DownloadCandidate, DownloadProgress, Resolution, SetupPlan } from "@/types/engine";
-import { fmtBytes } from "@/lib/format";
+import { fmtBytes, languageName } from "@/lib/format";
+import { languageOptions, systemLanguage } from "@/lib/languages";
 import { native } from "@/lib/native";
 import { PermissionsPanel, allGranted, usePermissions } from "@/components/PermissionsPanel";
 import { HardwareCard } from "@/components/HardwareCard";
 import { cn, isMac, platformName } from "@/lib/utils";
-import { Button, Switch } from "@/components/ui";
+import { Button, Select, Switch } from "@/components/ui";
 import logo from "@/assets/huddle-logo.svg";
 
 const TASK_LABEL: Record<string, string> = { transcription: "Transcription", diarization: "Speaker detection", llm: "AI notes" };
 
 /** One step per model, in the order they matter: transcription (required, with a choice of
  *  model), speaker detection (ships with the app; on or off), AI notes (optional: download or
- *  skip). macOS adds a permissions step. `returning`: the transcription model went missing after
- *  onboarding; only that step is shown. */
-type Step = "scan" | "transcription" | "speakers" | "ai" | "permissions";
+ *  skip), then the notes language — only when an AI model is in place, since without one no
+ *  notes are written. macOS adds a permissions step. `returning`: the transcription model went
+ *  missing after onboarding; only that step is shown. */
+type Step = "scan" | "transcription" | "speakers" | "ai" | "language" | "permissions";
 
 export function OnboardingScreen({ onDone, returning = false }: { onDone: () => void; returning?: boolean }) {
   const [scan, setScan] = useState(0);
@@ -28,9 +30,12 @@ export function OnboardingScreen({ onDone, returning = false }: { onDone: () => 
   const [downloads, setDownloads] = useState<DownloadProgress[]>([]);
   const [downloading, setDownloading] = useState<string | null>(null);   // candidate id in flight
   const [diarization, setDiarization] = useState(true);
+  const [notesLang, setNotesLang] = useState("auto");
+  const [sysLang, setSysLang] = useState("en");
 
   useEffect(() => {
-    api.getSettings().then((s) => setDiarization(s["speakers.diarization"] !== false)).catch(() => {});
+    api.getSettings().then((s) => { setDiarization(s["speakers.diarization"] !== false); setNotesLang((s["general.uiLanguage"] as string) || "auto"); }).catch(() => {});
+    native.getLocalePrefs().then((p) => setSysLang(systemLanguage(p.locale))).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -72,18 +77,23 @@ export function OnboardingScreen({ onDone, returning = false }: { onDone: () => 
   const ok = (r?: Resolution) => r?.status === "ready" || r?.status === "builtin";
   const download = async (id: string) => { setDownloading(id); await api.startDownload(id); };
   const finish = async () => { await api.updateSettings({ "onboarding.completed": true }); onDone(); };
+  const transcription = res("transcription");
+  const llm = res("llm");
+  // The language step only exists once an AI model is there (installed before, or downloaded in
+  // this run): without one no notes are written, so there is nothing to choose a language for.
+  const hasAi = ok(llm);
   // The permissions step asks macOS for the two recording permissions while the user is watching,
   // so the prompts never appear later from a menu-bar recording (a background prompt bounces the
   // Dock). Windows has no such prompts.
-  const afterAi = () => { if (isMac) { setStep("permissions"); } else { finish(); } };
+  const afterLanguage = () => { if (isMac) { setStep("permissions"); } else { finish(); } };
+  const afterAi = () => { if (hasAi) { setStep("language"); } else { afterLanguage(); } };
 
   const steps: { id: Step; label: string }[] = returning
     ? [{ id: "transcription", label: "Transcription" }]
-    : [{ id: "transcription", label: "Transcription" }, { id: "speakers", label: "Speakers" }, { id: "ai", label: "AI notes" }, ...(isMac ? [{ id: "permissions" as Step, label: "Recording" }] : [])];
+    : [{ id: "transcription", label: "Transcription" }, { id: "speakers", label: "Speakers" }, { id: "ai", label: "AI notes" },
+       ...(hasAi ? [{ id: "language" as Step, label: "Language" }] : []),
+       ...(isMac ? [{ id: "permissions" as Step, label: "Recording" }] : [])];
   const current = steps.findIndex((s) => s.id === step);
-
-  const transcription = res("transcription");
-  const llm = res("llm");
   const progressOf = (id?: string | null) => downloads.find((d) => d.id === id);
   const options = candidates.filter((c) => c.task === "transcription" && c.fit !== "no");
   const chosen = options.find((c) => c.id === choice) ?? options[0];
@@ -170,6 +180,26 @@ export function OnboardingScreen({ onDone, returning = false }: { onDone: () => 
                   <div className="mt-6 flex items-center justify-end gap-2">
                     <Button variant="ghost" onClick={() => setStep("transcription")}>Back</Button>
                     <Button variant="primary" onClick={() => setStep("ai")}>Continue</Button>
+                  </div>
+                </>
+              )}
+
+              {step === "language" && (
+                <>
+                  <h1 className="font-display text-[26px] font-bold tracking-tight">Notes language</h1>
+                  <p className="mt-1 text-[13px] text-muted">
+                    Summaries, decisions and action items are written in this language, whatever language is spoken. You can change it later in Settings.
+                  </p>
+                  <div className="mt-4 panel flex items-center justify-between gap-4 px-4 py-3">
+                    <div className="flex items-center gap-2 text-[13.5px] font-medium"><Languages className="h-4 w-4 text-muted" /> Notes language</div>
+                    <Select value={notesLang} onChange={(e) => { setNotesLang(e.target.value); api.updateSettings({ "general.uiLanguage": e.target.value }).catch(() => {}); }}>
+                      <option value="auto">System default ({languageName(sysLang)})</option>
+                      {languageOptions().map((l) => <option key={l.code} value={l.code}>{l.name}</option>)}
+                    </Select>
+                  </div>
+                  <div className="mt-6 flex items-center justify-end gap-2">
+                    <Button variant="ghost" onClick={() => setStep("ai")}>Back</Button>
+                    <Button variant="primary" onClick={afterLanguage}>{isMac ? "Continue" : "Start using Huddle"}</Button>
                   </div>
                 </>
               )}

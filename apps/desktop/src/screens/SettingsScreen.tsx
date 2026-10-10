@@ -57,6 +57,7 @@ export function SettingsScreen({ section, engine }: { section?: string; engine: 
       syncShellPrefs(patch);
       const plan = await api.setupPlan();
       setResolutions(plan.resolutions);
+      if ("notes.enabled" in patch || "models.ai" in patch) ai.refresh();
     } catch (e) { setError(errorMessage(e)); }
   };
 

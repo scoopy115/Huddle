@@ -118,7 +118,7 @@ cd engine; py -3.11 -m venv .venv; .venv\Scripts\pip install -r requirements.txt
 .venv\Scripts\python -m pytest
 ..\scripts\fetch-speaker-models.ps1
 cd ..\apps\desktop; npm install; npx tauri dev
-# release: scripts\build-engine.ps1 then scripts\build-app.ps1 (NSIS installer)
+# release (any platform): node scripts/release.mjs   (--unsigned for a local build)
 ```
 
 Platform-specific Tauri settings live in `tauri.macos.conf.json` and `tauri.windows.conf.json`

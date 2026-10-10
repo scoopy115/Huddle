@@ -4,7 +4,7 @@ import { RichTextEditor } from "@/components/RichTextEditor";
 import { api, errorMessage } from "@/lib/api";
 import type { ActionItem, AskResult, MeetingDetail, MeetingSpeaker } from "@/types/engine";
 import { fmtClock, fmtDate, fmtDuration, fmtDueDate, fmtTalkTime, fmtTime, languageName } from "@/lib/format";
-import { aiHint, useNav } from "@/lib/nav";
+import { aiHint, notesHint, notesOn, useNav } from "@/lib/nav";
 import { cn, speakerColor } from "@/lib/utils";
 import { AudioPlayer, type PlayerHandle } from "@/components/AudioPlayer";
 import { ProcessingStatus } from "@/components/ProcessingStatus";
@@ -238,23 +238,27 @@ export function MeetingScreen({ id, seek, segmentId, nonce, onChanged }: { id: s
           {!d.summary && d.segments.length > 0 && !processing && (
             <section className="mt-7">
               <SectionTitle>Summary</SectionTitle>
-              {ai.ready ? (
+              {notesOn(ai) ? (
                 <div className="flex items-center gap-3 text-[13px] text-muted">
                   No summary yet.
                   <Button size="sm" variant="secondary" onClick={() => retry("summarizing")}><Sparkles className="h-3.5 w-3.5" /> Create summary</Button>
                 </div>
               ) : (
-                <div className="flex items-center gap-3 rounded-lg border border-border bg-fg/[0.03] px-3 py-2.5 text-[13px] text-muted">
-                  <span className="flex-1">Summary, topics and decisions need a local AI model.</span>
-                  <Button size="sm" variant="secondary" onClick={() => go({ kind: "settings", section: "models:summaries" })}>Open Models</Button>
-                </div>
+                <NotesOff
+                  message={ai.ready ? "AI notes are turned off." : "Summary, topics and decisions need a local AI model."}
+                  action={ai.ready ? "Turn on" : "Open Models"}
+                  onAction={async () => {
+                    if (ai.ready) { await api.updateSettings({ "notes.enabled": true }).catch(() => {}); ai.refresh(); }
+                    else go({ kind: "settings", section: "models:summaries" });
+                  }}
+                />
               )}
             </section>
           )}
           {d.summary && (
             <section className="mt-7">
               <SectionTitle right={<div className="flex items-center gap-2">
-                <Button size="sm" variant="ghost" loading={refining} disabled={!ai.ready} title={ai.ready ? "Correct names, add context or ask for changes — Huddle fixes the transcript and rewrites the notes" : aiHint(ai)} onClick={() => { setContextHtml(m.contextHtml ?? ""); setRefine(true); }}><Wand2 className="h-3.5 w-3.5" /> Refine notes</Button>
+                <Button size="sm" variant="ghost" loading={refining} disabled={!notesOn(ai)} title={notesOn(ai) ? "Correct names, add context or ask for changes — Huddle fixes the transcript and rewrites the notes" : notesHint(ai)} onClick={() => { setContextHtml(m.contextHtml ?? ""); setRefine(true); }}><Wand2 className="h-3.5 w-3.5" /> Refine notes</Button>
               </div>}>Summary</SectionTitle>
               <p className="selectable text-[14px] leading-[1.65] text-fg/90">{d.summary.summary || <span className="text-muted">No summary.</span>}</p>
             </section>
@@ -421,5 +425,22 @@ function RenameDialog({ speaker, speakers, onClose, onRename, onMerge }: { speak
         </div>
       )}
     </Dialog>
+  );
+}
+
+/** The summary section when nothing can be written: a blurred stand-in for the notes with the
+ *  reason on top (no AI model, or "Write AI notes" switched off) and the one action that fixes it.
+ *  Replaces a button that ran a stage the engine then skipped without a word. */
+function NotesOff({ message, action, onAction }: { message: string; action: string; onAction: () => void }) {
+  return (
+    <div className="relative overflow-hidden rounded-lg border border-border">
+      <div aria-hidden className="select-none px-4 py-3 blur-[3px] opacity-50">
+        {[92, 100, 78, 96, 60].map((w, i) => <div key={i} className="mb-2.5 h-[9px] rounded bg-fg/20" style={{ width: `${w}%` }} />)}
+      </div>
+      <div className="absolute inset-0 flex items-center justify-center gap-3 bg-bg/40 px-4 text-[13px]">
+        <span className="text-fg/80">{message}</span>
+        <Button size="sm" variant="secondary" onClick={onAction}>{action}</Button>
+      </div>
+    </div>
   );
 }

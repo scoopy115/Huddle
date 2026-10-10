@@ -15,10 +15,14 @@ export type View =
 
 /** Whether summaries, Ask, Refine and action-item extraction can run (an AI model is resolved).
  *  `unsupported`: this computer cannot run one at all (`reason` says why). */
-export interface AiState { ready: boolean; reason: string | null; unsupported?: boolean; refresh: () => void }
+export interface AiState { ready: boolean; reason: string | null; unsupported?: boolean; notesEnabled?: boolean; refresh: () => void }
 export const AI_MISSING_HINT = "Needs an AI model — download one under Settings → Models.";
+export const NOTES_OFF_HINT = "AI notes are turned off under Settings → General → Notes.";
 /** The hint for disabled AI controls: the download hint, or why this computer cannot run a model. */
 export const aiHint = (ai: Pick<AiState, "reason" | "unsupported">) => (ai.unsupported && ai.reason ? `Needs an AI model. ${ai.reason}` : AI_MISSING_HINT);
+/** Summaries need a model *and* the "Write AI notes" switch; Ask and Refine only need the model. */
+export const notesOn = (ai: Pick<AiState, "ready" | "notesEnabled">) => ai.ready && ai.notesEnabled !== false;
+export const notesHint = (ai: Pick<AiState, "ready" | "reason" | "unsupported" | "notesEnabled">) => (ai.ready ? NOTES_OFF_HINT : aiHint(ai));
 
 /** Where a back button lands with nothing on the history stack (a deep link, or the first screen). */
 export function defaultParent(view: View): View {
