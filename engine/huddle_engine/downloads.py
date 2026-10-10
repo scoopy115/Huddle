@@ -104,12 +104,15 @@ class DownloadManager:
         from tqdm.auto import tqdm
 
         mgr, cid = self, cand.id
+        received = {"n": 0}   # across all files of the snapshot, so the bar never jumps back per file
 
         class _Progress(tqdm):
             def update(self, n=1):
                 super().update(n)
                 if getattr(self, "unit", "") == "B":
-                    mgr._update(cid, received_bytes=int(self.n), total_bytes=int(self.total or cand.size_bytes))
+                    received["n"] += int(n)
+                    total = cand.size_bytes or int(self.total or 0)
+                    mgr._update(cid, received_bytes=min(received["n"], total) if total else received["n"], total_bytes=total)
                 if cid in mgr._cancel:
                     raise _Cancelled()
 
