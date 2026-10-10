@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import queue
+import sys
 import threading
 import time
 import traceback
@@ -120,6 +122,13 @@ class JobRunner:
 
     # ---- worker ------------------------------------------------------------- #
     def _loop(self) -> None:
+        if sys.platform == "linux":
+            # Linux schedules per thread: a lower priority for this worker (and the compute threads
+            # it starts) keeps the HTTP side responsive while a transcription saturates the CPUs.
+            try:
+                os.setpriority(os.PRIO_PROCESS, 0, 10)
+            except OSError:
+                pass
         while True:
             meeting_id, names = self._q.get()
             try:
