@@ -27,7 +27,7 @@ export const STAGES: StageName[] = [
 
 /** Notes style: "meeting" = summary, topics, decisions; "interview" = summary + every question with its answer. */
 export type MeetingMode = "meeting" | "interview";
-/** Where a recording is processed: on this Mac or on a Huddle Server the user runs. */
+/** Where a recording is processed: on this computer or on a Huddle Server the user runs. */
 export type ProcessingTarget = "local" | "remote";
 
 export interface Meeting {

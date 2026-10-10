@@ -42,7 +42,7 @@ class ServerError(Exception):
 
 class UntrustedCertificate(ServerError):
     def __init__(self, fingerprint: str, subject: str, pem: str):
-        super().__init__("The server uses a certificate this Mac does not know.")
+        super().__init__("The server uses a certificate this computer does not know.")
         self.fingerprint, self.subject, self.pem = fingerprint, subject, pem
 
 

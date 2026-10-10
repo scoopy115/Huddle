@@ -6,7 +6,7 @@ import { Badge, Button, Card, DangerDialog, Dialog, Input, Row, Select } from "@
 
 type Update = (p: Partial<UserSettings>) => Promise<void>;
 
-/** Settings → Server: connect this Mac to a self-hosted Huddle Server. */
+/** Settings → Server: connect this computer to a self-hosted Huddle Server. */
 export function ServerSection({ settings, update }: { settings: UserSettings; update: Update }) {
   const [status, setStatus] = useState<ServerStatus | null>(null);
   const [url, setUrl] = useState(settings["server.url"] ?? "");
@@ -42,7 +42,7 @@ export function ServerSection({ settings, update }: { settings: UserSettings; up
         <Row label="Server address" hint="The address of your Huddle Server, for example https://huddle.example.com or https://192.168.1.20.">
           <Input className="w-[300px]" placeholder="https://" value={url} onChange={(e) => setUrl(e.target.value)} spellCheck={false} />
         </Row>
-        <Row label="Client key" hint="Generated in the server dashboard under Clients. One key per Mac.">
+        <Row label="Client key" hint="Generated in the server dashboard under Clients. One key per computer.">
           <Input className="w-[300px] font-mono" placeholder="hsk_…" type="password" value={key} onChange={(e) => setKey(e.target.value)} spellCheck={false} />
         </Row>
         <div className="flex items-center gap-2 border-t border-border px-4 py-3">
@@ -63,7 +63,7 @@ export function ServerSection({ settings, update }: { settings: UserSettings; up
         <Card className="mt-3">
           <Row label="Transcription" hint={caps.transcription ?? "No model installed on the server yet"}><Badge tone={caps.transcription ? "good" : "warn"}>{caps.transcription ? "Ready" : "Missing"}</Badge></Row>
           <Row label="Speaker detection"><Badge tone={caps.diarization ? "good" : "warn"}>{caps.diarization ? "Ready" : "Missing"}</Badge></Row>
-          <Row label="Notes" hint={caps.llm ? `AI model ${caps.llm}` : "No AI model on the server — notes are written on this Mac"}><Badge tone={caps.llm ? "good" : "neutral"}>{caps.llm ? "On the server" : "On this Mac"}</Badge></Row>
+          <Row label="Notes" hint={caps.llm ? `AI model ${caps.llm}` : "No AI model on the server — notes are written on this computer"}><Badge tone={caps.llm ? "good" : "neutral"}>{caps.llm ? "On the server" : "On this computer"}</Badge></Row>
           <Row label="Server version" hint={`Huddle Server ${result.server?.version} · engine ${result.server?.engineVersion}`}><Check className="h-3.5 w-3.5 text-emerald-600" /></Row>
         </Card>
       )}
@@ -72,10 +72,10 @@ export function ServerSection({ settings, update }: { settings: UserSettings; up
         <>
           <h3 className="mb-2 mt-6 font-display text-[11.5px] font-bold uppercase tracking-wider text-muted">New recordings</h3>
           <Card>
-            <Row label="Process on" hint="Ask: choose after every recording. The server keeps the audio and the notes; this Mac imports the result.">
+            <Row label="Process on" hint="Ask: choose after every recording. The server keeps the audio and the notes; this computer imports the result.">
               <Select value={settings["server.defaultTarget"] ?? "ask"} onChange={(e) => update({ "server.defaultTarget": e.target.value as UserSettings["server.defaultTarget"] })}>
                 <option value="ask">Ask every time</option>
-                <option value="local">This Mac</option>
+                <option value="local">This computer</option>
                 <option value="remote">The server</option>
               </Select>
             </Row>
@@ -91,7 +91,7 @@ export function ServerSection({ settings, update }: { settings: UserSettings; up
       </Dialog>
 
       <DangerDialog open={forgetting} onClose={() => setForgetting(false)} title="Disconnect from the server?" confirmLabel="Disconnect" seconds={0} onConfirm={forget}>
-        The address, the client key and the pinned certificate are removed from this Mac. Meetings already processed stay as they are.
+        The address, the client key and the pinned certificate are removed from this computer. Meetings already processed stay as they are.
         <span className="mt-2 block"><Trash2 className="mr-1 inline h-3 w-3" />Nothing is deleted on the server.</span>
       </DangerDialog>
     </>

@@ -66,7 +66,7 @@ class JobCancelled(Exception):
 
 
 class StageSkipped(Exception):
-    """The stage cannot run on this Mac right now (e.g. no AI model); not an error. The message
+    """The stage cannot run on this computer right now (e.g. no AI model); not an error. The message
     becomes the stage detail and the stage is recorded as skipped."""
 
 
@@ -457,7 +457,7 @@ def _server(ctx: StageContext):
     from .. import server_client
     sc = server_client.config_from_settings(ctx.cfg, ctx.settings)
     if not sc:
-        raise ProviderError("No Huddle Server is set up. Add one under Settings → Server, or process on this Mac.")
+        raise ProviderError("No Huddle Server is set up. Add one under Settings → Server, or process on this computer.")
     return server_client, sc
 
 

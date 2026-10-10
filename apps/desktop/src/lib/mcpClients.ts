@@ -4,7 +4,7 @@
  *    (`Authorization: Bearer hud_…`). For clients on other machines, or when the
  *    user prefers a URL over a spawned process.
  *  - "local": the stdio server started by `huddle-engine mcp --data-dir …`, for
- *    clients on this Mac. No key needed — the private data never leaves the process.
+ *    clients on this computer. No key needed — the private data never leaves the process.
  */
 export type McpClientId = "claude-code" | "claude-desktop" | "codex" | "cursor" | "copilot" | "windsurf" | "other";
 

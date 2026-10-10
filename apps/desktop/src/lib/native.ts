@@ -88,7 +88,7 @@ export interface ProxyStatus {
   error: string | null;
 }
 
-/** How an MCP client on this Mac should start Huddle's stdio MCP server. */
+/** How an MCP client on this computer should start Huddle's stdio MCP server. */
 export interface McpCommand {
   program: string;
   args: string[];

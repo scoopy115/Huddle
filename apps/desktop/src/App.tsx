@@ -162,7 +162,7 @@ export default function App() {
   // Recordings started from the menu bar or ⌥⌘R: the shell records, the UI turns the result into
   // a meeting once the engine is up. `recording:stopped` wakes a visible window; the pending
   // queue covers the case where the window was hidden or the engine was stopped meanwhile.
-  // Recordings nobody is watching (menu bar, recovery) follow the Server setting; "ask" means this Mac.
+  // Recordings nobody is watching (menu bar, recovery) follow the Server setting; "ask" means this computer.
   const defaultTarget = () => { const c = settings ? processingChoice(settings) : "local"; return c === "ask" ? "local" : c; };
   const submitPending = useCallback(async () => {
     if (engine.state !== "ready") return;

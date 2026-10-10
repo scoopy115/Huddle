@@ -63,7 +63,7 @@ pub async fn network_proxy_start(state: tauri::State<'_, ProxyState>, port: u16,
         Ok(l) => l,
         Err(e) => {
             let msg = if e.kind() == std::io::ErrorKind::AddrInUse {
-                format!("Port {port} is already in use on this Mac. Choose another port.")
+                format!("Port {port} is already in use on this computer. Choose another port.")
             } else {
                 format!("Port {port} could not be opened: {e}")
             };

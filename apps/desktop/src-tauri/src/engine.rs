@@ -133,7 +133,7 @@ pub struct McpCommand {
     pub development: bool,
 }
 
-/// The exact command an MCP client on this Mac should run to start Huddle's stdio MCP
+/// The exact command an MCP client on this computer should run to start Huddle's stdio MCP
 /// server: the same program the shell uses for the engine, with `mcp --data-dir …` instead
 /// of `serve`. Nothing is ever on `$PATH` — not the venv python, not the bundled sidecar —
 /// so the UI shows absolute paths.

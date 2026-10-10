@@ -2,7 +2,7 @@
 
 Huddle talks to whichever Ollama server is reachable: the user's own (Ollama.app or Homebrew,
 port 11434) when it runs; otherwise a server Huddle starts itself — from an `ollama` binary already
-on the Mac if there is one, else from a copy Huddle downloads once into `<models>/ollama/`. Huddle's
+on the computer if there is one, else from a copy Huddle downloads once into `<models>/ollama/`. Huddle's
 own server listens on 127.0.0.1:11435 and uses the standard model store (~/.ollama/models), so
 models pulled by either side are visible to both and nothing is stored twice."""
 from __future__ import annotations

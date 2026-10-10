@@ -139,7 +139,7 @@ export function useMeetingActions({ onChanged, onDeleted }: { onChanged: (m: Men
           <>
             <label className="mt-3 block text-[12px] text-muted">Process on</label>
             <Select wide className="mt-1" value={targetChoice} onChange={(e) => setTargetChoice(e.target.value as ProcessingTarget)}>
-              <option value="local">This Mac</option>
+              <option value="local">This computer</option>
               <option value="remote">{serverName ?? "The server"}</option>
             </Select>
           </>

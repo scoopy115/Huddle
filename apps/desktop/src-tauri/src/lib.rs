@@ -28,7 +28,7 @@ use tauri_plugin_global_shortcut::{Builder as ShortcutBuilder, ShortcutState};
 /// them to menu events before the webview sees the key, so the UI only listens for `menu`.
 #[cfg(target_os = "macos")]
 fn build_menu(app: &tauri::App) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
-    let about = AboutMetadata { name: Some("Huddle".into()), comments: Some("Private meeting notes, processed on this Mac.".into()), ..Default::default() };
+    let about = AboutMetadata { name: Some("Huddle".into()), comments: Some("Private meeting notes, processed on this computer.".into()), ..Default::default() };
     let app_menu = SubmenuBuilder::new(app, "Huddle")
         .about(Some(about))
         .separator()

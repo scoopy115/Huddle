@@ -3,8 +3,8 @@
 <plist version="1.0">
 <dict>
   <key>NSMicrophoneUsageDescription</key>
-  <string>Huddle records meetings with your microphone. Audio is processed and stored only on this Mac.</string>
+  <string>Huddle records meetings with your microphone. Audio is processed and stored only on this computer.</string>
   <key>NSAudioCaptureUsageDescription</key>
-  <string>Huddle can also record the audio of online meetings playing on this Mac. Nothing leaves your computer.</string>
+  <string>Huddle can also record the audio of online meetings playing on this computer. Nothing leaves your computer.</string>
 </dict>
 </plist>

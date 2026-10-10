@@ -9,8 +9,8 @@ export function cn(...inputs: ClassValue[]) {
 export const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
 export const isWindows = typeof navigator !== "undefined" && /Win/.test(navigator.platform);
 export const modKey = isMac ? "⌘" : "Ctrl+";
-/** "this Mac" / "this computer" in copy. */
-export const platformName = isMac ? "Mac" : "computer";
+/** "this computer" in copy. */
+export const platformName = "computer";
 /** The global record shortcut the shell registers. */
 export const recordShortcut = isMac ? "⌥⌘R" : "Ctrl+Alt+R";
 /** Where the small recorder lives when the window is closed. */
