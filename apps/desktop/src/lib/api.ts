@@ -68,7 +68,7 @@ export const api = {
     get<Meeting[]>(`/meetings${q({ q: query, project_id: opts?.projectId, unassigned: opts?.unassigned })}`),
   getMeeting: (id: string) => get<MeetingDetail>(`/meetings/${id}`),
   createFromRecording: (r: RecordingSubmission) => post<Meeting>("/meetings/from-recording", r),
-  importFile: (path: string, title?: string) => post<Meeting>("/meetings/import", { path, title }),
+  importFile: (path: string, opts?: { title?: string; processingTarget?: ProcessingTarget }) => post<Meeting>("/meetings/import", { path, ...opts }),
   updateMeeting: (id: string, body: { title?: string; notes?: string; languageOverride?: string; speakerCountHint?: number; projectId?: string; mode?: MeetingMode }) => patch<Meeting>(`/meetings/${id}`, body),
   deleteMeeting: (id: string) => del<{ ok: boolean }>(`/meetings/${id}`),
   deleteAudio: (id: string) => post<{ freedBytes: number }>(`/meetings/${id}/delete-audio`),

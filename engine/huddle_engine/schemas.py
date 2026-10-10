@@ -283,6 +283,7 @@ class ImportRequest(Schema):
     path: str
     title: str | None = None
     mode: MeetingMode = "meeting"
+    processing_target: ProcessingTarget = "local"   # imports follow the same choice as recordings
 
 
 class RefineRequest(Schema):

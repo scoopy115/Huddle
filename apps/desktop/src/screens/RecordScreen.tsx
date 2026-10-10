@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Languages, Laptop, Mic, Monitor, NotebookPen, Pause, Play, RefreshCw, Server, Square, Users, X } from "lucide-react";
+import { Languages, Mic, Monitor, NotebookPen, Pause, Play, RefreshCw, Square, Users, X } from "lucide-react";
+import { ProcessingTargetDialog, processingChoice } from "@/components/ProcessingTargetDialog";
 import { languageOptions } from "@/lib/languages";
 import { MODE_OPTIONS, SPEAKER_COUNT_OPTIONS, speakerCountLabel } from "@/components/MeetingMenu";
 import { resetAudio, sounds } from "@/lib/sounds";
@@ -8,13 +9,8 @@ import { api, errorMessage } from "@/lib/api";
 import { fmtTime } from "@/lib/format";
 import { useNav } from "@/lib/nav";
 import type { LiveStatus, MeetingMode, ProcessingTarget, UserSettings } from "@/types/engine";
-import { Button, Dialog, Select } from "@/components/ui";
+import { Button, Select } from "@/components/ui";
 
-/** Where a new recording goes: the setting decides, "ask" opens the chooser (only when a server is set up). */
-export function processingChoice(settings: UserSettings): ProcessingTarget | "ask" {
-  if (!settings["server.url"] || !settings["server.apiKey"]) return "local";
-  return settings["server.defaultTarget"] ?? "ask";
-}
 
 const BARS = 56;
 
@@ -285,21 +281,7 @@ export function RecordScreen({
         {error && <div className="max-w-[460px] rounded-lg border border-danger/30 bg-danger/5 px-3 py-2 text-center text-[12.5px] text-danger">{error}</div>}
       </div>
 
-      <Dialog open={!!stopped} onClose={() => stopped && submit(stopped, "local")} title="Process where?" width={440}>
-        <div className="grid grid-cols-2 gap-2">
-          <button className="pressable flex flex-col items-start gap-1.5 rounded-xl border border-border p-3 text-left hover:border-fg/30" onClick={() => stopped && submit(stopped, "local")}>
-            <Laptop className="h-4 w-4 text-muted" />
-            <span className="text-[13px] font-medium">This Mac</span>
-            <span className="text-[11.5px] text-muted">Everything stays here.</span>
-          </button>
-          <button className="pressable flex flex-col items-start gap-1.5 rounded-xl border border-accent/40 bg-accent-soft/40 p-3 text-left hover:border-accent" onClick={() => stopped && submit(stopped, "remote")}>
-            <Server className="h-4 w-4 text-accent" />
-            <span className="text-[13px] font-medium">{settings["server.name"] || "The server"}</span>
-            <span className="text-[11.5px] text-muted">Sent over TLS, result comes back here.</span>
-          </button>
-        </div>
-        <p className="mt-3 text-[11.5px] text-muted">Change the default under Settings → Server.</p>
-      </Dialog>
+      <ProcessingTargetDialog open={!!stopped} serverName={settings["server.name"]} onPick={(target) => stopped && submit(stopped, target)} />
     </div>
   );
 }

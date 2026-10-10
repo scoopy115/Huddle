@@ -12,7 +12,7 @@ import { PermissionsReminder } from "@/components/PermissionsReminder";
 import { AI_MISSING_HINT, NavContext, defaultParent, type View } from "@/lib/nav";
 import { isMac, isWindows } from "@/lib/utils";
 import { WindowControls } from "@/components/WindowControls";
-import type { Meeting, UserSettings } from "@/types/engine";
+import type { Meeting, ProcessingTarget, UserSettings } from "@/types/engine";
 import { Sidebar } from "@/components/Sidebar";
 import { CommandPalette } from "@/components/CommandPalette";
 import { configureLocale } from "@/lib/format";
@@ -25,7 +25,8 @@ import { MeetingsScreen } from "@/screens/MeetingsScreen";
 import { ProjectScreen } from "@/screens/ProjectScreen";
 import { ProjectsScreen } from "@/screens/ProjectsScreen";
 import { OnboardingScreen } from "@/screens/OnboardingScreen";
-import { RecordScreen, processingChoice } from "@/screens/RecordScreen";
+import { RecordScreen } from "@/screens/RecordScreen";
+import { ProcessingTargetDialog, processingChoice } from "@/components/ProcessingTargetDialog";
 import { SearchScreen } from "@/screens/SearchScreen";
 import { SettingsScreen } from "@/screens/SettingsScreen";
 
@@ -94,16 +95,27 @@ export default function App() {
     try { setMeetings(await api.listMeetings()); } catch (e) { setToast(errorMessage(e)); } finally { setLoading(false); }
   }, [engine.state]);
 
-  const importAudio = useCallback(async () => {
-    const picked = await open({ multiple: false, filters: [{ name: "Audio", extensions: ["wav", "mp3", "m4a", "mp4", "webm", "flac", "ogg", "aac", "mov"] }] });
-    if (!picked) return;
-    const path = typeof picked === "string" ? picked : (picked as { path: string }).path;
+  // Import Audio… asks the same "process where?" question as Stop when the server setting says
+  // ask; the file path waits in `pendingImport` until the answer.
+  const [pendingImport, setPendingImport] = useState<string | null>(null);
+  const importPath = useCallback(async (path: string, target: ProcessingTarget) => {
+    setPendingImport(null);
     try {
-      const m = await api.importFile(path);
+      const m = await api.importFile(path, { processingTarget: target });
       await refreshMeetings();
       go({ kind: "meeting", id: m.id });
     } catch (e) { setToast(errorMessage(e)); }
   }, [refreshMeetings, go]);
+  const importAudio = useCallback(async () => {
+    const picked = await open({ multiple: false, filters: [{ name: "Audio", extensions: ["wav", "mp3", "m4a", "mp4", "webm", "flac", "ogg", "aac", "mov"] }] });
+    if (!picked) return;
+    const path = typeof picked === "string" ? picked : (picked as { path: string }).path;
+    // Fresh settings: the Settings screen may have changed the default since this copy was loaded.
+    const s = await api.getSettings().catch(() => settings);
+    const choice = s ? processingChoice(s) : "local";
+    if (choice === "ask") { setPendingImport(path); return; }
+    await importPath(path, choice);
+  }, [settings, importPath]);
 
   // Shortcuts are accelerators of the native menu (Rust builds it; macOS delivers them as
   // `menu` events before the webview sees the key).
@@ -349,6 +361,7 @@ export default function App() {
       </div>
       {engine.state === "ready" && onboarded && <CommandPalette open={palette} onClose={() => setPalette(false)} meetings={meetings ?? []} />}
       <UpdateDialog />
+      <ProcessingTargetDialog open={!!pendingImport} serverName={settings?.["server.name"]} onPick={(t) => pendingImport && importPath(pendingImport, t)} />
       {onboarded && <PermissionsReminder />}
       <Dialog open={unfinished.length > 0} onClose={() => recover("later")} title={unfinished.length === 1 ? "Recover unfinished recording?" : `Recover ${unfinished.length} unfinished recordings?`}
         footer={<><Button variant="ghost" onClick={() => recover("no")}>No</Button><Button onClick={() => recover("later")}>Later</Button><Button variant="primary" onClick={() => recover("yes")}>Yes</Button></>}>

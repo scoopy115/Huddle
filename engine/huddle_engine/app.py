@@ -364,7 +364,7 @@ def from_recording(req: CreateFromRecordingRequest):
 def import_meeting(req: ImportRequest):
     c = ctx()
     try:
-        m = ms.import_file(c.db, c.cfg, req.path, req.title, mode=req.mode)
+        m = ms.import_file(c.db, c.cfg, req.path, req.title, mode=req.mode, processing_target=req.processing_target)
     except (FileNotFoundError, ValueError) as e:
         raise HTTPException(400, str(e))
     c.jobs.enqueue(m.id)

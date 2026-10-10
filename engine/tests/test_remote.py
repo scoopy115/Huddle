@@ -228,3 +228,14 @@ def test_plain_text_unauthorized_from_a_proxy(monkeypatch):
     with pytest.raises(server_client.ServerError) as ei:
         server_client.ping(_sc())
     assert "client key" in str(ei.value)
+
+
+def test_import_takes_the_processing_target(db, cfg, tmp_path):
+    """Import Audio… asks the same "process where?" question as Stop; the answer must reach the meeting."""
+    wav = tmp_path / "talk.wav"
+    sf.write(str(wav), np.zeros(16000, dtype=np.int16), 16000)
+    m = ms.import_file(db, cfg, str(wav), None, processing_target="remote")
+    assert ms.get_meeting(db, m.id).processing_target == "remote"
+    assert pipeline_for(ms.get_meeting(db, m.id).processing_target) == REMOTE_PIPELINE
+    local = ms.import_file(db, cfg, str(wav), None, processing_target="nonsense")
+    assert ms.get_meeting(db, local.id).processing_target == "local"

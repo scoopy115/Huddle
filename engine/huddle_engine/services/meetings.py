@@ -107,7 +107,8 @@ def create_from_recording(db: Database, cfg: EngineConfig, req: CreateFromRecord
     return get_meeting(db, req.id)
 
 
-def import_file(db: Database, cfg: EngineConfig, src: str, title: str | None, mode: str = "meeting") -> Meeting:
+def import_file(db: Database, cfg: EngineConfig, src: str, title: str | None, mode: str = "meeting",
+                processing_target: str = "local") -> Meeting:
     p = Path(src).expanduser()
     if not p.exists():
         raise FileNotFoundError(f"File not found: {src}")
@@ -118,7 +119,8 @@ def import_file(db: Database, cfg: EngineConfig, src: str, title: str | None, mo
     (cfg.recordings_dir / mid).mkdir(parents=True, exist_ok=True)
     req = CreateFromRecordingRequest(id=mid, file_path=str(p), started_at=started, duration_sec=0.0,
                                      format=p.suffix.lstrip(".").lower(), title=title or p.stem, source="imported",
-                                     mode=mode if mode in MODES else "meeting")
+                                     mode=mode if mode in MODES else "meeting",
+                                     processing_target=processing_target if processing_target in TARGETS else "local")
     return create_from_recording(db, cfg, req)
 
 
