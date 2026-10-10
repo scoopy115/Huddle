@@ -1,6 +1,6 @@
 [package]
 name = "huddle"
-version = "0.10.3"
+version = "0.10.4"
 description = "Huddle — private, local-first meeting recorder and knowledge base"
 authors = ["Dylan Kiesebrink"]
 license = "MIT"

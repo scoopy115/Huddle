@@ -26,7 +26,7 @@ import { ProjectScreen } from "@/screens/ProjectScreen";
 import { ProjectsScreen } from "@/screens/ProjectsScreen";
 import { OnboardingScreen } from "@/screens/OnboardingScreen";
 import { RecordScreen } from "@/screens/RecordScreen";
-import { ProcessingTargetDialog, processingChoice } from "@/components/ProcessingTargetDialog";
+import { useProcessingTarget } from "@/components/ProcessingTargetDialog";
 import { SearchScreen } from "@/screens/SearchScreen";
 import { SettingsScreen } from "@/screens/SettingsScreen";
 
@@ -104,11 +104,10 @@ export default function App() {
     try { setMeetings(await api.listMeetings()); } catch (e) { setToast(errorMessage(e)); } finally { setLoading(false); }
   }, [engine.state]);
 
-  // Import Audio… asks the same "process where?" question as Stop when the server setting says
-  // ask; the file path waits in `pendingImport` until the answer.
-  const [pendingImport, setPendingImport] = useState<string | null>(null);
+  // Import Audio… asks the same "process where?" question as Stop.
+  const processing = useProcessingTarget();
+  const resolveTarget = processing.resolve;
   const importPath = useCallback(async (path: string, target: ProcessingTarget) => {
-    setPendingImport(null);
     try {
       const m = await api.importFile(path, { processingTarget: target });
       await refreshMeetings();
@@ -119,12 +118,8 @@ export default function App() {
     const picked = await open({ multiple: false, filters: [{ name: "Audio", extensions: ["wav", "mp3", "m4a", "mp4", "webm", "flac", "ogg", "aac", "mov"] }] });
     if (!picked) return;
     const path = typeof picked === "string" ? picked : (picked as { path: string }).path;
-    // Fresh settings: the Settings screen may have changed the default since this copy was loaded.
-    const s = await api.getSettings().catch(() => settings);
-    const choice = s ? processingChoice(s) : "local";
-    if (choice === "ask") { setPendingImport(path); return; }
-    await importPath(path, choice);
-  }, [settings, importPath]);
+    await importPath(path, await resolveTarget());
+  }, [resolveTarget, importPath]);
 
   // Shortcuts are accelerators of the native menu (Rust builds it; macOS delivers them as
   // `menu` events before the webview sees the key).
@@ -172,14 +167,14 @@ export default function App() {
   // a meeting once the engine is up. `recording:stopped` wakes a visible window; the pending
   // queue covers the case where the window was hidden or the engine was stopped meanwhile.
   // Recordings nobody is watching (menu bar, recovery) follow the Server setting; "ask" means this computer.
-  const defaultTarget = () => { const c = settings ? processingChoice(settings) : "local"; return c === "ask" ? "local" : c; };
+  const defaultTarget = () => resolveTarget({ unattended: true });
   const submitPending = useCallback(async () => {
     if (engine.state !== "ready") return;
     const list = await native.takePendingRecordings().catch(() => [] as RecordingMeta[]);
     for (const r of list) {
       if (r.status !== "saved" || r.durationSec < 1) { if (r.error) setToast(r.error); continue; }
       try {
-        const meeting = await api.createFromRecording({ id: r.id, filePath: r.filePath, systemFilePath: r.systemFilePath ?? null, startedAt: r.startedAt, durationSec: r.durationSec, inputDevice: r.inputDevice, sampleRate: r.sampleRate, channels: r.channels, format: r.format, source: "recorded", process: true, processingTarget: defaultTarget() });
+        const meeting = await api.createFromRecording({ id: r.id, filePath: r.filePath, systemFilePath: r.systemFilePath ?? null, startedAt: r.startedAt, durationSec: r.durationSec, inputDevice: r.inputDevice, sampleRate: r.sampleRate, channels: r.channels, format: r.format, source: "recorded", process: true, processingTarget: await defaultTarget() });
         await refreshMeetings();
         go({ kind: "meeting", id: meeting.id });
       } catch (e) { setToast(errorMessage(e)); }
@@ -298,7 +293,7 @@ export default function App() {
     const done: string[] = [];
     for (const r of list) {
       try {
-        await api.createFromRecording({ id: r.id, filePath: r.filePath, systemFilePath: r.systemFilePath ?? null, startedAt: r.startedAt, durationSec: r.durationSec, inputDevice: r.inputDevice, sampleRate: r.sampleRate, channels: r.channels, format: r.format, source: "recovered", title: "Recovered recording", process: true, processingTarget: defaultTarget() });
+        await api.createFromRecording({ id: r.id, filePath: r.filePath, systemFilePath: r.systemFilePath ?? null, startedAt: r.startedAt, durationSec: r.durationSec, inputDevice: r.inputDevice, sampleRate: r.sampleRate, channels: r.channels, format: r.format, source: "recovered", title: "Recovered recording", process: true, processingTarget: await defaultTarget() });
         done.push(r.id);
       } catch (e) { setToast(errorMessage(e)); }
     }
@@ -370,7 +365,7 @@ export default function App() {
       </div>
       {engine.state === "ready" && onboarded && <CommandPalette open={palette} onClose={() => setPalette(false)} meetings={meetings ?? []} />}
       <UpdateDialog />
-      <ProcessingTargetDialog open={!!pendingImport} serverName={settings?.["server.name"]} onPick={(t) => pendingImport && importPath(pendingImport, t)} />
+      {processing.dialogs}
       {onboarded && <PermissionsReminder />}
       <Dialog open={unfinished.length > 0} onClose={() => recover("later")} title={unfinished.length === 1 ? "Recover unfinished recording?" : `Recover ${unfinished.length} unfinished recordings?`}
         footer={<><Button variant="ghost" onClick={() => recover("no")}>No</Button><Button onClick={() => recover("later")}>Later</Button><Button variant="primary" onClick={() => recover("yes")}>Yes</Button></>}>

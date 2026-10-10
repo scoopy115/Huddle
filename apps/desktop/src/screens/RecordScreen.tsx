@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Languages, Mic, Monitor, NotebookPen, Pause, Play, RefreshCw, Square, Users, X } from "lucide-react";
-import { ProcessingTargetDialog, processingChoice } from "@/components/ProcessingTargetDialog";
+import { useProcessingTarget } from "@/components/ProcessingTargetDialog";
 import { languageOptions } from "@/lib/languages";
 import { MODE_OPTIONS, SPEAKER_COUNT_OPTIONS, speakerCountLabel } from "@/components/MeetingMenu";
 import { resetAudio, sounds } from "@/lib/sounds";
@@ -30,7 +30,7 @@ export function RecordScreen({
   const [language, setLanguage] = useState<string>("auto");
   const [speakerCount, setSpeakerCount] = useState(0);
   const [mode, setMode] = useState<MeetingMode>("meeting");
-  const [stopped, setStopped] = useState<RecordingMeta | null>(null);   // waiting for the "where to process" choice
+  const processing = useProcessingTarget();
   const [support, setSupport] = useState<SystemAudioSupport | null>(null);
   const [meta, setMeta] = useState<RecordingMeta | null>(null);
   const [elapsed, setElapsed] = useState(0);
@@ -166,14 +166,11 @@ export function RecordScreen({
       if (m.status !== "saved") { setError(m.error ?? "The recording could not be saved."); return; }
       if (m.durationSec < 1) { setError("The recording was too short to keep."); return; }
       try { await api.liveStop(m.id, true); } catch { /* fall back to a full transcription */ }
-      const choice = processingChoice(settings);
-      if (choice === "ask") { setStopped(m); return; }
-      await submit(m, choice);
+      await submit(m, await processing.resolve());
     } catch (e) { setError(errorMessage(e)); } finally { setBusy(false); }
   };
 
   const submit = async (m: RecordingMeta, target: ProcessingTarget) => {
-    setStopped(null);
     setBusy(true);
     try {
       const meeting = await api.createFromRecording({
@@ -281,7 +278,7 @@ export function RecordScreen({
         {error && <div className="max-w-[460px] rounded-lg border border-danger/30 bg-danger/5 px-3 py-2 text-center text-[12.5px] text-danger">{error}</div>}
       </div>
 
-      <ProcessingTargetDialog open={!!stopped} serverName={settings["server.name"]} onPick={(target) => stopped && submit(stopped, target)} />
+      {processing.dialogs}
     </div>
   );
 }
