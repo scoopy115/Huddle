@@ -3,6 +3,13 @@
     "targets": [
       "deb",
       "appimage"
-    ]
+    ],
+    "linux": {
+      "deb": {
+        "recommends": [
+          "pulseaudio-utils"
+        ]
+      }
+    }
   }
 }

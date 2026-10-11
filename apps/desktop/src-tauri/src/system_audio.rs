@@ -5,7 +5,8 @@
 //!   macOS offers no query for, so the shell probes the tap once (DECISIONS #63).
 //! * Windows: WASAPI loopback — cpal opens the default *output* device as an input stream and
 //!   delivers whatever the PC is playing. No helper, no driver, no permission.
-//! * Linux: not supported yet (PipeWire/PulseAudio monitor sources are the way; later).
+//! * Linux: `parec` records the monitor of the default output (PulseAudio, or PipeWire through
+//!   pipewire-pulse) as mono PCM16; no permission is involved.
 //!
 //! The recorder (`recording.rs`) only sees `SystemTap`: start → level/heard → pause → stop.
 
@@ -433,11 +434,17 @@ mod win {
 #[cfg(target_os = "windows")]
 use win as platform;
 
-// ---- Linux: microphone only for now ----------------------------------------------------------
+// ---- Linux: the monitor of the default output, through parec -------------------------------
 
 #[cfg(all(unix, not(target_os = "macos")))]
 mod other {
     use super::*;
+    use std::io::{Read, Write};
+    use std::process::{Child, Command, Stdio};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::time::{Duration, Instant};
+
+    const RATE: u32 = 48_000;
 
     pub fn mic_permission() -> String {
         "granted".into()
@@ -455,26 +462,123 @@ mod other {
         Ok(())
     }
 
+    fn have(cmd: &str) -> bool {
+        Command::new(cmd).arg("--version").stdout(Stdio::null()).stderr(Stdio::null()).status().is_ok()
+    }
+
+    /// PulseAudio and PipeWire (through pipewire-pulse) both expose every output as a monitor
+    /// source; `parec` from pulseaudio-utils records one and converts it to mono PCM16 itself.
     pub fn support(_app: &tauri::AppHandle) -> SystemAudioSupport {
-        SystemAudioSupport { supported: false, permission: "unknown".into(), message: Some("System audio capture is not available on Linux yet.".into()) }
+        if !have("parec") {
+            return SystemAudioSupport { supported: false, permission: "unknown".into(), message: Some("System audio needs parec. Install pulseaudio-utils (PipeWire: pipewire-pulse).".into()) };
+        }
+        let server_ok = !have("pactl") || Command::new("pactl").arg("info").stdout(Stdio::null()).stderr(Stdio::null()).status().map(|s| s.success()).unwrap_or(false);
+        if server_ok {
+            answer("granted")
+        } else {
+            SystemAudioSupport { supported: false, permission: "unknown".into(), message: Some("No PulseAudio or PipeWire sound server found.".into()) }
+        }
     }
 
     pub fn request(app: &tauri::AppHandle) -> SystemAudioSupport {
         support(app)
     }
 
+    /// `parec` on the default output's monitor, written as mono PCM16 to `system.wav`.
     pub struct SystemTap {
+        child: Option<Child>,
+        reader: Option<std::thread::JoinHandle<Result<(), String>>>,
+        pause: Arc<crate::recording::Pause>,
         pub level: Arc<Mutex<f32>>,
-        pub heard: Arc<std::sync::atomic::AtomicBool>,
+        pub heard: Arc<AtomicBool>,
     }
 
     impl SystemTap {
-        pub fn start(_out_wav: &Path) -> Result<SystemTap, String> {
-            Err("System audio capture is not available on Linux yet.".into())
+        pub fn start(out_wav: &Path) -> Result<SystemTap, String> {
+            let mut child = Command::new("parec")
+                .args(["--device=@DEFAULT_MONITOR@", "--format=s16le", &format!("--rate={RATE}"), "--channels=1", "--latency-msec=50"])
+                .stdout(Stdio::piped())
+                .stderr(Stdio::null())
+                .spawn()
+                .map_err(|e| format!("System audio capture could not start (parec): {e}"))?;
+            let mut stdout = child.stdout.take().ok_or("parec gave no output")?;
+            let mut file = std::fs::OpenOptions::new().create(true).write(true).truncate(true).open(out_wav).map_err(|e| e.to_string())?;
+            file.write_all(&crate::recording::wav_header(RATE, 1, 0)).map_err(|e| e.to_string())?;
+
+            let level = Arc::new(Mutex::new(0f32));
+            let heard = Arc::new(AtomicBool::new(false));
+            let pause = crate::recording::Pause::new();
+            let reader = {
+                let (level, heard, pause) = (level.clone(), heard.clone(), pause.clone());
+                std::thread::Builder::new().name("huddle-system-audio".into()).spawn(move || -> Result<(), String> {
+                    let started = Instant::now();
+                    let mut data_len: u64 = 0;
+                    let mut last_patch = Instant::now();
+                    let mut buf = vec![0u8; 9600];   // 100 ms
+                    let mut carry: Option<u8> = None;
+                    loop {
+                        let n = match stdout.read(&mut buf) {
+                            Ok(0) | Err(_) => break,
+                            Ok(n) => n,
+                        };
+                        let mut bytes = Vec::with_capacity(n + 1);
+                        bytes.extend(carry.take());
+                        bytes.extend_from_slice(&buf[..n]);
+                        if bytes.len() % 2 == 1 {
+                            carry = bytes.pop();
+                        }
+                        if bytes.is_empty() {
+                            continue;
+                        }
+                        let sum_sq: f64 = bytes.chunks_exact(2).map(|c| { let v = i16::from_le_bytes([c[0], c[1]]) as f64 / 32768.0; v * v }).sum();
+                        let rms = (sum_sq / (bytes.len() / 2) as f64).sqrt() as f32;
+                        if rms > 0.0 {
+                            heard.store(true, Ordering::Relaxed);
+                        }
+                        if let Ok(mut g) = level.lock() {
+                            *g = rms;
+                        }
+                        if pause.is_paused() {
+                            continue;
+                        }
+                        // A suspended output sends nothing while it is silent: pad with zeros so
+                        // this track keeps the microphone's timeline.
+                        let expected = (pause.elapsed(started) * RATE as f64) as u64 * 2;
+                        if expected > data_len + RATE as u64 / 2 {
+                            let gap = (expected - data_len) as usize & !1;
+                            file.write_all(&vec![0u8; gap]).map_err(|e| e.to_string())?;
+                            data_len += gap as u64;
+                        }
+                        file.write_all(&bytes).map_err(|e| e.to_string())?;
+                        data_len += bytes.len() as u64;
+                        if last_patch.elapsed() >= Duration::from_secs(1) {
+                            crate::recording::patch_header(&mut file, RATE, data_len).map_err(|e| e.to_string())?;
+                            file.flush().map_err(|e| e.to_string())?;
+                            last_patch = Instant::now();
+                        }
+                    }
+                    crate::recording::patch_header(&mut file, RATE, data_len).map_err(|e| e.to_string())?;
+                    file.sync_all().map_err(|e| e.to_string())
+                }).map_err(|e| e.to_string())?
+            };
+            log::info!("system audio: parec on the monitor of the default output");
+            Ok(SystemTap { child: Some(child), reader: Some(reader), pause, level, heard })
         }
-        pub fn set_paused(&self, _paused: bool) {}
-        pub fn stop(self) -> Result<(), String> {
-            Ok(())
+
+        pub fn set_paused(&self, paused: bool) {
+            if paused { self.pause.pause() } else { self.pause.resume() }
+        }
+
+        pub fn stop(mut self) -> Result<(), String> {
+            if let Some(mut c) = self.child.take() {
+                let _ = c.kill();
+                let _ = c.wait();
+            }
+            match self.reader.take().map(|h| h.join()) {
+                Some(Ok(r)) => r,
+                Some(Err(_)) => Err("System audio writer panicked".into()),
+                None => Ok(()),
+            }
         }
     }
 }

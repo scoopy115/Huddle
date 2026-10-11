@@ -32,7 +32,7 @@ case "$(uname -s)" in
       echo "engine/.venv is missing - create it first (see the header of this script)" >&2
       exit 1
     fi
-    PLATFORM_ARGS=(--exclude-module mlx --exclude-module mlx_whisper --exclude-module parakeet_mlx --exclude-module numba --exclude-module llvmlite) ;;
+    PLATFORM_ARGS=(--collect-all zstandard --exclude-module mlx --exclude-module mlx_whisper --exclude-module parakeet_mlx --exclude-module numba --exclude-module llvmlite) ;;
 esac
 $PY -m PyInstaller --noconfirm --clean --name huddle-engine --onedir --distpath dist.nosync --workpath build.nosync \
   --paths . \

@@ -14,6 +14,7 @@ import contextlib
 import ctypes.util
 import logging
 import os
+import platform
 import sys
 import zipfile
 from collections.abc import Callable
@@ -29,9 +30,13 @@ if os.name == "nt":
     WHEEL_URL = "https://files.pythonhosted.org/packages/45/a1/a17fade6567c57452cfc8f967a40d1035bb9301db52f27808167fbb2be2f/nvidia_cublas_cu12-12.9.1.4-py3-none-win_amd64.whl"
     WHEEL_SIZE = 553_000_000
     LIBS = ("cublas64_12.dll", "cublasLt64_12.dll")
+elif platform.machine().lower() in ("aarch64", "arm64"):
+    WHEEL_URL = "https://files.pythonhosted.org/packages/82/6c/90d3f532f608a03a13c1d6c16c266ffa3828e8011b1549d3b61db2ad59f5/nvidia_cublas_cu12-12.9.1.4-py3-none-manylinux_2_27_aarch64.whl"
+    WHEEL_SIZE = 575_000_000
+    LIBS = ("libcublas.so.12", "libcublasLt.so.12")
 else:
-    WHEEL_URL = "https://pypi.org/simple/nvidia-cublas-cu12/"   # resolved per platform later
-    WHEEL_SIZE = 600_000_000
+    WHEEL_URL = "https://files.pythonhosted.org/packages/77/3c/aa88abe01f3be3d1f8f787d1d33dc83e76fec05945f9a28fbb41cfb99cd5/nvidia_cublas_cu12-12.9.1.4-py3-none-manylinux_2_27_x86_64.whl"
+    WHEEL_SIZE = 581_000_000
     LIBS = ("libcublas.so.12", "libcublasLt.so.12")
 
 _models_dir: Path | None = None
@@ -83,6 +88,11 @@ def activate() -> None:
     os.environ["PATH"] = str(d) + os.pathsep + os.environ.get("PATH", "")
     if os.name != "nt":
         os.environ["LD_LIBRARY_PATH"] = str(d) + os.pathsep + os.environ.get("LD_LIBRARY_PATH", "")
+        # The loader read LD_LIBRARY_PATH when the process started, so load the libraries by path
+        # now (cuBLASLt first, cuBLAS depends on it); CTranslate2 then finds them already loaded.
+        for lib in sorted(LIBS, key=lambda n: "Lt" not in n):
+            with contextlib.suppress(OSError):
+                ctypes.CDLL(str(d / lib), mode=ctypes.RTLD_GLOBAL)
     _activated = True
     log.info("cuBLAS from %s", d)
 

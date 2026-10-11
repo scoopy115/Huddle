@@ -5,4 +5,4 @@ runner, provider abstractions (transcription / diarization / LLM), model
 discovery + resolution, and the MCP server.
 """
 
-__version__ = "0.10.5"
+__version__ = "0.10.6"

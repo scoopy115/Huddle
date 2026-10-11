@@ -10,6 +10,7 @@ from __future__ import annotations
 import atexit
 import logging
 import os
+import platform
 import shutil
 import subprocess
 import sys
@@ -38,8 +39,11 @@ elif os.name == "nt":
     ARCHIVE_URL = f"{_RELEASES}/ollama-windows-amd64.zip"
     ARCHIVE_SIZE = 1_100_000_000
 else:
-    ARCHIVE_URL = f"{_RELEASES}/ollama-linux-amd64.tgz"
-    ARCHIVE_SIZE = 1_000_000_000
+    # A .tar.zst holding bin/ollama and lib/ollama/ (the runner libraries sit next to bin/, so the
+    # archive is unpacked as it is, not flattened).
+    _ARCH = "arm64" if platform.machine().lower() in ("aarch64", "arm64") else "amd64"
+    ARCHIVE_URL = f"{_RELEASES}/ollama-linux-{_ARCH}.tar.zst"
+    ARCHIVE_SIZE = 1_500_000_000
 EXE = "ollama.exe" if os.name == "nt" else "ollama"
 # No console window behind the app on Windows.
 _NO_WINDOW = {"creationflags": 0x08000000} if os.name == "nt" else {}
@@ -163,6 +167,10 @@ def install(progress: Callable[[int, int | None], None] | None = None, cancelled
         import zipfile
         with zipfile.ZipFile(archive) as z:
             z.extractall(dest)
+    elif archive.suffix == ".zst":
+        import zstandard
+        with open(archive, "rb") as raw, zstandard.ZstdDecompressor().stream_reader(raw) as reader, tarfile.open(fileobj=reader, mode="r|") as tar:
+            tar.extractall(runtime_dir(), filter="data")
     else:
         with tarfile.open(archive) as tar:
             try:

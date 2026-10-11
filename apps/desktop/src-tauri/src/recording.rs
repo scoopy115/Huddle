@@ -102,7 +102,7 @@ impl Pause {
         self.paused.load(Ordering::Relaxed)
     }
     /// Recorded time so far, given the wall-clock start.
-    fn elapsed(&self, started: Instant) -> f64 {
+    pub(crate) fn elapsed(&self, started: Instant) -> f64 {
         let current = self.since.lock().ok().and_then(|g| g.map(|t| t.elapsed())).unwrap_or_default();
         let paused = Duration::from_millis(self.total_ms.load(Ordering::Relaxed)) + current;
         started.elapsed().saturating_sub(paused).as_secs_f64()
@@ -145,7 +145,7 @@ pub struct RecorderState {
     pending: Mutex<Vec<RecordingMeta>>,
 }
 
-fn wav_header(sample_rate: u32, channels: u16, data_len: u32) -> [u8; 44] {
+pub(crate) fn wav_header(sample_rate: u32, channels: u16, data_len: u32) -> [u8; 44] {
     let byte_rate = sample_rate * channels as u32 * 2;
     let block_align = channels * 2;
     let mut h = [0u8; 44];
@@ -165,7 +165,7 @@ fn wav_header(sample_rate: u32, channels: u16, data_len: u32) -> [u8; 44] {
     h
 }
 
-fn patch_header(file: &mut File, sample_rate: u32, data_len: u64) -> std::io::Result<()> {
+pub(crate) fn patch_header(file: &mut File, sample_rate: u32, data_len: u64) -> std::io::Result<()> {
     let len = data_len.min(u32::MAX as u64) as u32;
     let h = wav_header(sample_rate, 1, len);
     let pos = file.stream_position()?;
