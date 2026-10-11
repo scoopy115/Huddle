@@ -10,19 +10,34 @@
 # models are never bundled. numba must stay: mlx_whisper needs it for word timings.
 set -euo pipefail
 cd "$(dirname "$0")/../engine"
-# Release builds use the packaging venv (scripts/setup-pack-python.sh): python-build-standalone
+# macOS release builds use the packaging venv (scripts/setup-pack-python.sh): python-build-standalone
 # plus wheels for macOS 14, so the sidecar runs on every supported Mac. The dev venv's Homebrew
 # Python only loads on the macOS it was installed on (see setup-pack-python.sh).
-if [ -x .venv-pack.nosync/bin/python ]; then
-  PY=.venv-pack.nosync/bin/python
-else
-  echo "no packaging venv; run scripts/setup-pack-python.sh first (a sidecar from the dev venv only runs on this macOS)" >&2
-  exit 1
-fi
+# Linux builds use engine/.venv (python3.11 -m venv .venv; pip install -r requirements.txt pyinstaller).
+# Build on the oldest distribution you want to support: the sidecar needs at least that glibc.
+# The Apple-only packages (mlx, mlx-whisper, parakeet-mlx) are left out there.
+case "$(uname -s)" in
+  Darwin)
+    if [ -x .venv-pack.nosync/bin/python ]; then
+      PY=.venv-pack.nosync/bin/python
+    else
+      echo "no packaging venv; run scripts/setup-pack-python.sh first (a sidecar from the dev venv only runs on this macOS)" >&2
+      exit 1
+    fi
+    PLATFORM_ARGS=(--collect-all mlx --collect-all mlx_whisper --collect-all parakeet_mlx) ;;
+  *)
+    if [ -x .venv/bin/python ]; then
+      PY=.venv/bin/python
+    else
+      echo "engine/.venv is missing - create it first (see the header of this script)" >&2
+      exit 1
+    fi
+    PLATFORM_ARGS=(--exclude-module mlx --exclude-module mlx_whisper --exclude-module parakeet_mlx --exclude-module numba --exclude-module llvmlite) ;;
+esac
 $PY -m PyInstaller --noconfirm --clean --name huddle-engine --onedir --distpath dist.nosync --workpath build.nosync \
   --paths . \
   --collect-all ctranslate2 --collect-all faster_whisper --collect-all av \
-  --collect-all mlx --collect-all mlx_whisper --collect-all parakeet_mlx --collect-all sherpa_onnx --collect-all onnxruntime \
+  "${PLATFORM_ARGS[@]}" --collect-all sherpa_onnx --collect-all onnxruntime \
   --collect-all sklearn --collect-all scipy --collect-all soundfile \
   --collect-all tiktoken --collect-submodules tiktoken_ext --collect-all tokenizers --collect-all huggingface_hub \
   --collect-all pydantic --exclude-module mcp.cli --collect-submodules huddle_engine \
@@ -49,11 +64,13 @@ find "$INTERNAL" -type d -empty -delete
 after=$(find "$INTERNAL" -type f | wc -l | tr -d ' ')
 echo "pruned: $before → $after files"
 
+if [ "$(uname -s)" = "Darwin" ]; then
 # Nothing in the sidecar may need a newer macOS than Huddle supports (14.x).
 newest=$(find dist.nosync/huddle-engine -type f \( -name "*.so" -o -name "*.dylib" -o -name Python \) -exec sh -c \
   'otool -l "$1" 2>/dev/null | awk "/LC_BUILD_VERSION/{f=1} f&&/minos/{print \$2; exit}"' _ {} \; | sort -V | tail -1)
 echo "highest minimum macOS in the sidecar: ${newest:-?}"
 case "${newest:-}" in 1[5-9].*|[2-9][0-9].*) echo "sidecar needs macOS $newest — rebuild the packaging venv" >&2; exit 1;; esac
+fi
 
 ls -la dist.nosync/huddle-engine/huddle-engine
 du -sh dist.nosync/huddle-engine

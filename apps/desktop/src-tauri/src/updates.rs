@@ -76,6 +76,9 @@ fn parse_version(tag: &str) -> Option<semver::Version> {
 /// updaters of 0.5.2–0.6.1; ignored). Windows: the NSIS `-setup.exe` (or an `.msi`) whose name
 /// mentions Windows/x64.
 fn pick_asset(assets: &[Asset]) -> Option<&Asset> {
+    // No in-app installer on Linux: the dialog sends people to the release page (package manager,
+    // .deb or AppImage, their choice).
+    if cfg!(not(any(target_os = "macos", target_os = "windows"))) { return None; }
     let (exts, hints): (&[&str], &[&str]) = if cfg!(target_os = "windows") {
         (&[".exe", ".msi"], &["windows", "win", "x64", "amd64", "setup"])
     } else {

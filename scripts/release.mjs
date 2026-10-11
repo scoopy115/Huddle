@@ -14,6 +14,10 @@
 //   speaker models if missing → engine venv if missing → engine sidecar (when newer) →
 //   build-app.ps1. Signs with HUDDLE_WIN_CERT_THUMBPRINT when set.
 //
+// Linux → Huddle-<version>-linux-<x64|arm64>.deb and .AppImage (unsigned):
+//   speaker models if missing → engine venv if missing → engine sidecar (when newer) →
+//   build-app-linux.sh. Build on the oldest distribution you want to support (glibc).
+//
 // The per-step scripts stay usable on their own; this file only decides the order and checks
 // what can be skipped. Node is the one runtime both build machines have (Tauri needs it).
 import { spawnSync } from "node:child_process";
@@ -60,7 +64,7 @@ function sidecarFresh(sidecar) {
   return statSync(sidecar).mtimeMs >= newestSource(join(root, "engine/huddle_engine"));
 }
 
-console.log(`Huddle ${version} release build for ${win ? "Windows" : process.platform === "darwin" ? "macOS" : process.platform}${dryRun ? " (dry run)" : ""}`);
+console.log(`Huddle ${version} release build for ${win ? "Windows" : process.platform === "darwin" ? "macOS" : process.platform === "linux" ? "Linux" : process.platform}${dryRun ? " (dry run)" : ""}`);
 
 if (win) {
   const models = join(root, "apps/desktop/src-tauri/resources/models/speaker/nemo_titanet_large.onnx");
@@ -110,6 +114,27 @@ if (win) {
   const out = join(root, `apps/desktop/src-tauri/target.nosync/release/bundle/macos/Huddle-${version}-macos-arm64.dmg`);
   if (!dryRun && !existsSync(out)) fail(`Disk image not found at ${out}`);
   console.log(`\nRelease asset: ${out}\nTag the GitHub release v${version} and attach it.`);
+} else if (process.platform === "linux") {
+  const models = join(root, "apps/desktop/src-tauri/resources/models/speaker/nemo_titanet_large.onnx");
+  if (existsSync(models)) skip("Speaker models", "present"); else sh("Speaker models", "fetch-speaker-models.sh");
+
+  const venvPy = join(root, "engine/.venv/bin/python");
+  if (existsSync(venvPy)) {
+    skip("Engine venv", "present");
+  } else {
+    step("Engine venv", "python3.11", ["-m", "venv", join(root, "engine/.venv")]);
+    step("Engine requirements", venvPy, ["-m", "pip", "install", "-q", "-r", join(root, "engine/requirements.txt"), "pyinstaller"]);
+  }
+
+  const sidecar = join(root, "engine/dist.nosync/huddle-engine/huddle-engine");
+  if (sidecarFresh(sidecar)) skip("Engine sidecar", "up to date"); else sh("Engine sidecar", "build-engine.sh");
+
+  sh("Packages (.deb + AppImage)", "build-app-linux.sh");
+  const arch = process.arch === "arm64" ? "arm64" : "x64";
+  const dir = join(root, "apps/desktop/src-tauri/target.nosync/release/bundle");
+  const out = [`deb/Huddle-${version}-linux-${arch}.deb`, `appimage/Huddle-${version}-linux-${arch}.AppImage`].map((f) => join(dir, f));
+  if (!dryRun) for (const f of out) if (!existsSync(f)) fail(`Package not found at ${f}`);
+  console.log(`\nRelease assets:\n  ${out.join("\n  ")}\nTag the GitHub release v${version} and attach them.`);
 } else {
-  fail("Linux packaging is not set up yet.");
+  fail(`No packaging for ${process.platform}.`);
 }
