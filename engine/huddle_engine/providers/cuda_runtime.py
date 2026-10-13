@@ -35,8 +35,10 @@ elif platform.machine().lower() in ("aarch64", "arm64"):
     WHEEL_SIZE = 575_000_000
     LIBS = ("libcublas.so.12", "libcublasLt.so.12")
 else:
+    # Direct file URL, not the PyPI index page (which is HTML and made the download fail with
+    # "File is not a zip file"). Same version as Windows; x86_64 here; the aarch64 wheel is above.
     WHEEL_URL = "https://files.pythonhosted.org/packages/77/3c/aa88abe01f3be3d1f8f787d1d33dc83e76fec05945f9a28fbb41cfb99cd5/nvidia_cublas_cu12-12.9.1.4-py3-none-manylinux_2_27_x86_64.whl"
-    WHEEL_SIZE = 581_000_000
+    WHEEL_SIZE = 581_242_350
     LIBS = ("libcublas.so.12", "libcublasLt.so.12")
 
 _models_dir: Path | None = None
@@ -56,8 +58,13 @@ def runtime_dir() -> Path:
 
 
 def supported() -> bool:
-    """Only PCs: Apple Silicon has no CUDA, and the macOS wheel has no CUDA build."""
-    return sys.platform != "darwin"
+    """Only PCs: Apple Silicon has no CUDA, and the macOS wheel has no CUDA build.
+    On Linux the cuBLAS wheel is the x86_64 one only (WHEEL_URL)."""
+    if sys.platform == "darwin":
+        return False
+    if sys.platform.startswith("linux"):
+        return platform.machine().lower() in ("x86_64", "amd64")
+    return True
 
 
 def installed() -> bool:

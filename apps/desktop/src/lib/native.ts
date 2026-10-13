@@ -2,6 +2,7 @@
 // `invoke` anywhere else, so the Rust boundary is documented in one place.
 import { invoke, convertFileSrc } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import { isMac, isWindows } from "./utils";
 
 export interface AppPaths {
   dataDir: string;
@@ -160,7 +161,9 @@ const desktop = {
     listen<EngineStatus>("engine:status", (ev) => cb(ev.payload)),
   onMenu: (cb: (id: string) => void): Promise<UnlistenFn> => listen<string>("menu", (ev) => cb(ev.payload)),
   getMcpCommand: () => invoke<McpCommand>("engine_mcp_command"),
-  audioSrc: (_meetingId: string, path: string) => convertFileSrc(path),
+  // WebKitGTK (Linux) does not play <audio> from the asset protocol; there the engine serves it.
+  audioSrc: async (meetingId: string, path: string): Promise<string> =>
+    isMac || isWindows ? convertFileSrc(path) : invoke<string>("engine_audio_url", { meetingId }),
   systemAudioSupport: () => invoke<SystemAudioSupport>("system_audio_support"),
   requestSystemAudioPermission: () => invoke<SystemAudioSupport>("request_system_audio_permission"),
   openSystemAudioSettings: () => invoke<void>("open_system_audio_settings"),

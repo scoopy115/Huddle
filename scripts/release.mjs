@@ -14,14 +14,15 @@
 //   speaker models if missing → engine venv if missing → engine sidecar (when newer) →
 //   build-app.ps1. Signs with HUDDLE_WIN_CERT_THUMBPRINT when set.
 //
-// Linux → Huddle-<version>-linux-<x64|arm64>.deb and .AppImage (unsigned):
-//   speaker models if missing → engine venv if missing → engine sidecar (when newer) →
-//   build-app-linux.sh. Build on the oldest distribution you want to support (glibc).
+// Linux → Huddle-<version>-linux-<x64|arm64>.AppImage and .deb (unsigned):
+//   speaker models if missing → engine sidecar (build-engine-linux.sh, uv + Python 3.11) when the
+//   sources are newer → AppImage → repack without the build machine's WebKitGTK/GStreamer → .deb.
+//   Build on the oldest distribution you want to support (glibc). The AppImage pipeline is x86-64.
 //
 // The per-step scripts stay usable on their own; this file only decides the order and checks
 // what can be skipped. Node is the one runtime both build machines have (Tauri needs it).
 import { spawnSync } from "node:child_process";
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { copyFileSync, existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -32,11 +33,11 @@ const unsigned = args.has("--unsigned");
 const version = JSON.parse(readFileSync(join(root, "apps/desktop/src-tauri/tauri.conf.json"), "utf8")).version;
 const win = process.platform === "win32";
 
-function step(title, cmd, cmdArgs, env = {}) {
+function step(title, cmd, cmdArgs, env = {}, cwd = root) {
   console.log(`\n==> ${title}`);
   console.log(`    ${[cmd, ...cmdArgs].join(" ")}`);
   if (dryRun) return;
-  const r = spawnSync(cmd, cmdArgs, { cwd: root, stdio: "inherit", env: { ...process.env, ...env }, shell: false });
+  const r = spawnSync(cmd, cmdArgs, { cwd, stdio: "inherit", env: { ...process.env, ...env }, shell: false });
   if (r.status !== 0) {
     console.error(`\n${title} failed (exit ${r.status ?? r.signal}).`);
     process.exit(r.status || 1);
@@ -118,23 +119,29 @@ if (win) {
   const models = join(root, "apps/desktop/src-tauri/resources/models/speaker/nemo_titanet_large.onnx");
   if (existsSync(models)) skip("Speaker models", "present"); else sh("Speaker models", "fetch-speaker-models.sh");
 
-  const venvPy = join(root, "engine/.venv/bin/python");
-  if (existsSync(venvPy)) {
-    skip("Engine venv", "present");
-  } else {
-    step("Engine venv", "python3.11", ["-m", "venv", join(root, "engine/.venv")]);
-    step("Engine requirements", venvPy, ["-m", "pip", "install", "-q", "-r", join(root, "engine/requirements.txt"), "pyinstaller"]);
-  }
-
   const sidecar = join(root, "engine/dist.nosync/huddle-engine/huddle-engine");
-  if (sidecarFresh(sidecar)) skip("Engine sidecar", "up to date"); else sh("Engine sidecar", "build-engine.sh");
+  if (sidecarFresh(sidecar)) skip("Engine sidecar", "up to date"); else sh("Engine sidecar", "build-engine-linux.sh");
 
-  sh("Packages (.deb + AppImage)", "build-app-linux.sh");
+  // linuxdeploy cannot find the libgomp copies that scikit-learn/ctranslate2 ship inside the
+  // engine ("Could not find dependency: libgomp-…so"); pointing LD_LIBRARY_PATH at them fixes it.
+  const dist = join(root, "engine/dist.nosync/huddle-engine/_internal");
+  const libPath = [dist, join(dist, "ctranslate2.libs"), join(dist, "scikit_learn.libs")].join(":");
+  step("App bundle (AppImage)", "npx", ["tauri", "build", "--bundles", "appimage"], { LD_LIBRARY_PATH: libPath }, join(root, "apps/desktop"));
+  // Tauri bundles WebKitGTK and GStreamer from the build machine, which clash with the host's
+  // (grey screen on Bazzite); the repack leaves them out so the host's versions are used.
+  sh("Repack AppImage without WebKit/GStreamer", "repack-appimage-linux.sh");
+  // The .deb uses the system's WebKitGTK as it is.
+  step("Package (.deb)", "npx", ["tauri", "build", "--bundles", "deb"], {}, join(root, "apps/desktop"));
+
   const arch = process.arch === "arm64" ? "arm64" : "x64";
-  const dir = join(root, "apps/desktop/src-tauri/target.nosync/release/bundle");
-  const out = [`deb/Huddle-${version}-linux-${arch}.deb`, `appimage/Huddle-${version}-linux-${arch}.AppImage`].map((f) => join(dir, f));
-  if (!dryRun) for (const f of out) if (!existsSync(f)) fail(`Package not found at ${f}`);
-  console.log(`\nRelease assets:\n  ${out.join("\n  ")}\nTag the GitHub release v${version} and attach them.`);
+  const bundle = join(root, "apps/desktop/src-tauri/target.nosync/release/bundle");
+  const debArch = arch === "arm64" ? "arm64" : "amd64";
+  const pairs = [
+    [join(bundle, `appimage/Huddle_${version}_amd64.AppImage`), join(bundle, `appimage/Huddle-${version}-linux-${arch}.AppImage`)],
+    [join(bundle, `deb/Huddle_${version}_${debArch}.deb`), join(bundle, `deb/Huddle-${version}-linux-${arch}.deb`)],
+  ];
+  if (!dryRun) for (const [from, to] of pairs) { if (!existsSync(from)) fail(`Package not found at ${from}`); copyFileSync(from, to); }
+  console.log(`\nRelease assets:\n  ${pairs.map((p) => p[1]).join("\n  ")}\nNo signing on Linux. Tag the GitHub release v${version} and attach them.`);
 } else {
-  fail(`No packaging for ${process.platform}.`);
+  fail(`Unsupported platform: ${process.platform}`);
 }

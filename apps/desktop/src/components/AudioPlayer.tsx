@@ -33,7 +33,15 @@ export function AudioPlayer({
   const [time, setTime] = useState(0);
   const [duration, setDuration] = useState(durationHint ?? 0);
   const [rate, setRate] = useState(1);
-  const src = path ? native.audioSrc(meetingId, path) : null;
+  // undefined while the source is being resolved, null when there is no audio to play.
+  const [src, setSrc] = useState<string | null | undefined>(undefined);
+  useEffect(() => {
+    if (!path) { setSrc(null); return; }
+    let live = true;
+    setSrc(undefined);
+    native.audioSrc(meetingId, path).then((s) => { if (live) setSrc(s); }, () => { if (live) setSrc(null); });
+    return () => { live = false; };
+  }, [meetingId, path]);
 
   useEffect(() => {
     handleRef.current = {
@@ -77,6 +85,7 @@ export function AudioPlayer({
     return () => obs.disconnect();
   }, [src]);
 
+  if (src === undefined) return null;
   if (!src) {
     return <div className="rounded-lg border border-dashed border-border px-4 py-3 text-[12px] text-muted">Audio not available for this meeting.</div>;
   }

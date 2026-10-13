@@ -396,6 +396,19 @@ pub async fn engine_restart(app: AppHandle, state: State<'_, EngineState>) -> Re
     Ok(engine_status(state))
 }
 
+/// URL a meeting's audio plays from in the webview: the engine's audio route, with the token in
+/// the query (an <audio> element cannot send headers; the engine accepts `?token=` on `/audio`).
+/// Used on Linux, where WebKitGTK's media player does not play from the asset protocol.
+#[tauri::command]
+pub fn engine_audio_url(state: State<'_, EngineState>, meeting_id: String) -> Result<String, String> {
+    let g = state.inner.lock().unwrap();
+    match g.as_ref() {
+        Some(i) if i.status.state == "ready" => Ok(format!("http://127.0.0.1:{}/meetings/{}/audio?token={}", i.port, meeting_id, i.token)),
+        Some(i) => Err(format!("engine:{}", i.status.state)),
+        None => Err("engine:starting".into()),
+    }
+}
+
 /// Proxy an HTTP request to the engine. `path` starts with `/`.
 #[tauri::command]
 pub async fn engine_fetch(

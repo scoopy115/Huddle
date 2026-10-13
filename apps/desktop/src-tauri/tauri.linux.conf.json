@@ -1,10 +1,13 @@
 {
   "bundle": {
     "targets": [
-      "deb",
-      "appimage"
+      "appimage",
+      "deb"
     ],
     "linux": {
+      "appimage": {
+        "bundleMediaFramework": false
+      },
       "deb": {
         "recommends": [
           "pulseaudio-utils"
