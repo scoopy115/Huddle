@@ -177,6 +177,7 @@ pub fn run() {
             updates::open_download,
             engine::engine_status,
             engine::engine_fetch,
+            engine::engine_audio_url,
             engine::engine_restart,
             engine::engine_mcp_command,
             netproxy::network_proxy_start,

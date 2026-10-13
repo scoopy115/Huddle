@@ -14,6 +14,7 @@ import contextlib
 import ctypes.util
 import logging
 import os
+import platform
 import sys
 import zipfile
 from collections.abc import Callable
@@ -30,8 +31,10 @@ if os.name == "nt":
     WHEEL_SIZE = 553_000_000
     LIBS = ("cublas64_12.dll", "cublasLt64_12.dll")
 else:
-    WHEEL_URL = "https://pypi.org/simple/nvidia-cublas-cu12/"   # resolved per platform later
-    WHEEL_SIZE = 600_000_000
+    # Direct file URL, not the PyPI index page (which is HTML and made the download fail with
+    # "File is not a zip file"). Same version as Windows; x86_64 only.
+    WHEEL_URL = "https://files.pythonhosted.org/packages/77/3c/aa88abe01f3be3d1f8f787d1d33dc83e76fec05945f9a28fbb41cfb99cd5/nvidia_cublas_cu12-12.9.1.4-py3-none-manylinux_2_27_x86_64.whl"
+    WHEEL_SIZE = 581_242_350
     LIBS = ("libcublas.so.12", "libcublasLt.so.12")
 
 _models_dir: Path | None = None
@@ -51,8 +54,13 @@ def runtime_dir() -> Path:
 
 
 def supported() -> bool:
-    """Only PCs: Apple Silicon has no CUDA, and the macOS wheel has no CUDA build."""
-    return sys.platform != "darwin"
+    """Only PCs: Apple Silicon has no CUDA, and the macOS wheel has no CUDA build.
+    On Linux the cuBLAS wheel is the x86_64 one only (WHEEL_URL)."""
+    if sys.platform == "darwin":
+        return False
+    if sys.platform.startswith("linux"):
+        return platform.machine().lower() in ("x86_64", "amd64")
+    return True
 
 
 def installed() -> bool:

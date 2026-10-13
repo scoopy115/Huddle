@@ -28,11 +28,11 @@ const unsigned = args.has("--unsigned");
 const version = JSON.parse(readFileSync(join(root, "apps/desktop/src-tauri/tauri.conf.json"), "utf8")).version;
 const win = process.platform === "win32";
 
-function step(title, cmd, cmdArgs, env = {}) {
+function step(title, cmd, cmdArgs, env = {}, cwd = root) {
   console.log(`\n==> ${title}`);
   console.log(`    ${[cmd, ...cmdArgs].join(" ")}`);
   if (dryRun) return;
-  const r = spawnSync(cmd, cmdArgs, { cwd: root, stdio: "inherit", env: { ...process.env, ...env }, shell: false });
+  const r = spawnSync(cmd, cmdArgs, { cwd, stdio: "inherit", env: { ...process.env, ...env }, shell: false });
   if (r.status !== 0) {
     console.error(`\n${title} failed (exit ${r.status ?? r.signal}).`);
     process.exit(r.status || 1);
@@ -110,6 +110,24 @@ if (win) {
   const out = join(root, `apps/desktop/src-tauri/target.nosync/release/bundle/macos/Huddle-${version}-macos-arm64.dmg`);
   if (!dryRun && !existsSync(out)) fail(`Disk image not found at ${out}`);
   console.log(`\nRelease asset: ${out}\nTag the GitHub release v${version} and attach it.`);
+} else if (process.platform === "linux") {
+  const models = join(root, "apps/desktop/src-tauri/resources/models/speaker/nemo_titanet_large.onnx");
+  if (existsSync(models)) skip("Speaker models", "present"); else sh("Speaker models", "fetch-speaker-models.sh");
+
+  const sidecar = join(root, "engine/dist.nosync/huddle-engine/huddle-engine");
+  if (sidecarFresh(sidecar)) skip("Engine sidecar", "up to date"); else sh("Engine sidecar", "build-engine-linux.sh");
+
+  // linuxdeploy cannot find the libgomp copies that scikit-learn/ctranslate2 ship inside the
+  // engine ("Could not find dependency: libgomp-…so"); pointing LD_LIBRARY_PATH at them fixes it.
+  const dist = join(root, "engine/dist.nosync/huddle-engine/_internal");
+  const libPath = [dist, join(dist, "ctranslate2.libs"), join(dist, "scikit_learn.libs")].join(":");
+  step("App bundle (AppImage)", "npx", ["tauri", "build", "--bundles", "appimage"], { LD_LIBRARY_PATH: libPath }, join(root, "apps/desktop"));
+  // Tauri bundles WebKitGTK and GStreamer from the build machine, which clash with the host's
+  // (grey screen on Bazzite); the repack leaves them out so the host's versions are used.
+  sh("Repack AppImage without WebKit/GStreamer", "repack-appimage-linux.sh");
+  const out = join(root, `apps/desktop/src-tauri/target.nosync/release/bundle/appimage/Huddle_${version}_amd64.AppImage`);
+  if (!dryRun && !existsSync(out)) fail(`AppImage not found at ${out}`);
+  console.log(`\nRelease asset: ${out}\nNo signing on Linux; the AppImage runs on Bazzite as is (chmod +x, then double-click or run from a terminal).`);
 } else {
-  fail("Linux packaging is not set up yet.");
+  fail(`Unsupported platform: ${process.platform}`);
 }
